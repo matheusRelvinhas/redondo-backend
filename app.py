@@ -1,7 +1,7 @@
 import os
 from flask import Flask
 from flask_cors import CORS
-from models import db, User
+from models import db
 from routes.register_blueprints import register_blueprints
 from dotenv import load_dotenv
 

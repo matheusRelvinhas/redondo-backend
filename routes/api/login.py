@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from email_validator import validate_email, EmailNotValidError
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User
-from utils import responseApi
+from utils import responseApi, get_access_and_user
 
 def validate_email_function(email: str) -> bool:
     try:
@@ -25,8 +25,6 @@ def generate_jwt_token(user_id):
         'exp': datetime.utcnow() + timedelta(hours=24)
     }
     encode = jwt.encode(payload, os.getenv('JWT_SECRET_KEY'), algorithm='HS256')
-    decode = jwt.decode(encode, os.getenv('JWT_SECRET_KEY'), algorithms=['HS256'])
-    print(f"{decode.get('user_id')}")
     return encode
 
 bp = Blueprint('login', __name__, url_prefix='/api/login')
@@ -63,17 +61,14 @@ def login():
 
 @bp.route('/logout', methods=["GET"])
 def logout():
+    token = request.args.get('token')
+    get_access_and_user(token)
     return responseApi({"message": "logout_success"}, 200)
 
 @bp.route('/check_auth', methods=["GET"])
 def check_auth():
     token = request.args.get('token')
-    if not token:
-        return responseApi({"error": "token_missing"}, 400)   
-    payload = jwt.decode(token, os.getenv('JWT_SECRET_KEY'), algorithms=['HS256'])
-    print(f"{payload.get('user_id')}")
-    user_id = payload.get('user_id')
-    user = User.query.filter_by(id=user_id).first()
+    user = get_access_and_user(token)
     if user:
         return responseApi(
             {
