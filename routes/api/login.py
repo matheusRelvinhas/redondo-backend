@@ -1,7 +1,7 @@
 import re
 import jwt
 import os
-from flask import Blueprint, request
+from flask import Blueprint, request, redirect, current_app
 from datetime import datetime, timedelta
 from email_validator import validate_email, EmailNotValidError
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -42,7 +42,7 @@ def login():
         if existing_user:
             return responseApi({"error": "user_exists"}, 400)
         hashed_password = generate_password_hash(password)
-        new_user = User(email=email, password=hashed_password)
+        new_user = User(email=email, password=hashed_password, amount_logins=0)
         db.session.add(new_user)
         db.session.commit()
         token_jwt = generate_jwt_token(new_user.id)
@@ -52,12 +52,42 @@ def login():
         user = User.query.filter_by(email=email).first()
         if not user:
             return responseApi({"error": "user_not_found"}, 400)
-        if not check_password_hash(user.password, password):
+        else:
+            user.amount_logins += 1
+            db.session.commit()
+        if not user.password or not check_password_hash(user.password, password):
             return responseApi({"error": "invalid_email_password"}, 400)
         token_jwt = generate_jwt_token(user.id)
         return responseApi({"message": "login_success", "user_id": user.id, "token": token_jwt}, 200)
     return responseApi({"error": "invalid_email_password"}, 400)
 
+@bp.route('/google')
+def google_login():
+    google = current_app.oauth.create_client('google')
+    redirect_uri = f"{os.getenv('BACKEND_URL')}/api/login/google/callback"
+    return google.authorize_redirect(redirect_uri)
+
+@bp.route('/google/callback')
+def google_callback():
+    google = current_app.oauth.create_client('google')
+    google.authorize_access_token()
+    user_info = google.userinfo()
+    email = user_info.get("email")
+    name = user_info.get("name")
+    if not email:
+        return responseApi({"error": "google_login_failed"}, 400)
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        user = User(email=email, name=name, password=None, amount_logins=0)
+        login_type='register'
+        db.session.add(user)
+    else:
+        user.amount_logins += 1
+        login_type='login'
+    db.session.commit()
+    jwt_token = generate_jwt_token(user.id)
+    redirect_url = f"{os.getenv('FRONTEND_URL')}/login?login_type={login_type}&token={jwt_token}"
+    return redirect(redirect_url)
 
 @bp.route('/logout', methods=["GET"])
 def logout():
@@ -81,5 +111,3 @@ def check_auth():
             }, 200)
     else:
         return responseApi({"error": "user_not_found"}, 400)
-
-
