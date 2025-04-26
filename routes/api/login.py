@@ -1,6 +1,7 @@
 import re
 import jwt
 import os
+import resend
 from flask import Blueprint, request, redirect, current_app
 from datetime import datetime, timedelta
 from email_validator import validate_email, EmailNotValidError
@@ -33,7 +34,6 @@ def login():
     email = request.args.get('email')
     password = request.args.get('pwd')
     login_type = request.args.get('login_type')
-
     if not email or not password or not login_type or not validate_email_function(email) or not validate_password(password):
         return responseApi({"error": "invalid_email_password"}, 400)
 
@@ -111,3 +111,45 @@ def check_auth():
             }, 200)
     else:
         return responseApi({"error": "user_not_found"}, 400)
+
+@bp.route('/recover_password', methods=["GET"])
+def recover_password():
+    email = request.args.get('email')
+    resend.api_key = os.getenv('RESEND_API_KEY')
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return responseApi({"error": "invalid_email"}, 400)
+    recover_token = generate_jwt_token(user.id)
+    reset_link = f"{os.getenv('FRONTEND_URL')}/login?recover_token={recover_token}"
+    print(reset_link)
+    try:
+        #response = resend.Emails.send({
+        #    "from": "onboarding@resend.dev",
+        #    "to": email,
+        #    "subject": 'Recuperar senha - Project X',
+        #    "html": f"<p>Olá, clique no link abaixo para redefinir sua senha:</p><a href='{reset_link}' target='_blank'>{reset_link}</a>"
+        #})
+        return responseApi({"message": "email_sent"}, 200)
+    except Exception as e:
+        print("Erro ao enviar e-mail:", e)
+        return responseApi({"error": "error_recover_password"}, 400)
+
+@bp.route('/reset_password', methods=["GET"])
+def reset_password():
+    recover_token = request.args.get('recover_token')
+    new_password = request.args.get("new_password")
+    if not recover_token or not new_password or not validate_password(new_password):
+        return responseApi({"error": "error_reset_password"}, 400)
+    try:
+        decoded = jwt.decode(recover_token, os.getenv('JWT_SECRET_KEY'), algorithms=['HS256'])
+        user_id = decoded.get("user_id")
+    except jwt.ExpiredSignatureError:
+        return responseApi({"error": "token_expired"}, 400)
+    except jwt.InvalidTokenError:
+        return responseApi({"error": "error_reset_password"}, 400)
+    user = User.query.get(user_id)
+    if not user:
+        return responseApi({"error": "error_reset_password"}, 400)
+    user.password = generate_password_hash(new_password)
+    db.session.commit()
+    return responseApi({"message": "password_updated"}, 200)
