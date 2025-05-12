@@ -1,0 +1,122 @@
+[
+    {
+        "slug": "tyloo-cs-go-vs-flyquest-11-05-2025",
+        "tier": "a",
+        "round": "Grand final",
+        "stage": "Asian Champions League 2025 Group B",
+        "bo_type": 3,
+        "start_date": "2025-05-11T10:05:00.000+00:00",
+        "team1_slug": "tyloo-cs-go",
+        "team2_slug": "flyquest"
+    },
+    {
+        "slug": "jijiehao-vs-lynn-vision-11-05-2025",
+        "tier": "a",
+        "round": "Grand final",
+        "stage": "Asian Champions League 2025 Group A",
+        "bo_type": 3,
+        "start_date": "2025-05-11T06:55:00.000+00:00",
+        "team1_slug": "jijiehao",
+        "team2_slug": "lynn-vision"
+    },
+    {
+        "slug": "flyquest-vs-rare-atom-10-05-2025",
+        "tier": "a",
+        "round": "Lower bracket final",
+        "stage": "Asian Champions League 2025 Group B",
+        "bo_type": 3,
+        "start_date": "2025-05-10T09:45:00.000+00:00",
+        "team1_slug": "flyquest",
+        "team2_slug": "rare-atom"
+    },
+    {
+        "slug": "lynn-vision-vs-the-huns-esports-10-05-2025",
+        "tier": "a",
+        "round": "Lower bracket final",
+        "stage": "Asian Champions League 2025 Group A",
+        "bo_type": 3,
+        "start_date": "2025-05-10T06:55:00.000+00:00",
+        "team1_slug": "lynn-vision",
+        "team2_slug": "the-huns-esports"
+    },
+    {
+        "slug": "rare-atom-vs-nomads-mg-09-05-2025",
+        "tier": "a",
+        "round": "Lower bracket semifinal",
+        "stage": "Asian Champions League 2025 Group B",
+        "bo_type": 3,
+        "start_date": "2025-05-09T10:45:00.000+00:00",
+        "team1_slug": "nomads-mg",
+        "team2_slug": "rare-atom"
+    },
+    {
+        "slug": "tyloo-cs-go-vs-flyquest-09-05-2025",
+        "tier": "a",
+        "round": "Upper bracket final",
+        "stage": "Asian Champions League 2025 Group B",
+        "bo_type": 3,
+        "start_date": "2025-05-09T06:50:00.000+00:00",
+        "team1_slug": "flyquest",
+        "team2_slug": "tyloo-cs-go"
+    },
+    {
+        "slug": "the-huns-esports-vs-ninja-cn-08-05-2025",
+        "tier": "a",
+        "round": "Lower bracket semifinal",
+        "stage": "Asian Champions League 2025 Group A",
+        "bo_type": 3,
+        "start_date": "2025-05-08T10:10:00.000+00:00",
+        "team1_slug": "the-huns-esports",
+        "team2_slug": "ninja-cn"
+    },
+    {
+        "slug": "jijiehao-vs-lynn-vision-08-05-2025",
+        "tier": "a",
+        "round": "Upper bracket final",
+        "stage": "Asian Champions League 2025 Group A",
+        "bo_type": 3,
+        "start_date": "2025-05-08T06:50:00.000+00:00",
+        "team1_slug": "jijiehao",
+        "team2_slug": "lynn-vision"
+    },
+    {
+        "slug": "flyquest-vs-nomads-mg-07-05-2025",
+        "tier": "a",
+        "round": "Upper bracket semifinal",
+        "stage": "Asian Champions League 2025 Group B",
+        "bo_type": 3,
+        "start_date": "2025-05-07T09:25:00.000+00:00",
+        "team1_slug": "flyquest",
+        "team2_slug": "nomads-mg"
+    },
+    {
+        "slug": "tyloo-cs-go-vs-rare-atom-07-05-2025",
+        "tier": "a",
+        "round": "Upper bracket semifinal",
+        "stage": "Asian Champions League 2025 Group B",
+        "bo_type": 3,
+        "start_date": "2025-05-07T06:45:00.000+00:00",
+        "team1_slug": "tyloo-cs-go",
+        "team2_slug": "rare-atom"
+    },
+    {
+        "slug": "lynn-vision-vs-ninja-cn-06-05-2025",
+        "tier": "a",
+        "round": "Upper bracket semifinal",
+        "stage": "Asian Champions League 2025 Group A",
+        "bo_type": 3,
+        "start_date": "2025-05-06T10:40:00.000+00:00",
+        "team1_slug": "lynn-vision",
+        "team2_slug": "ninja-cn"
+    },
+    {
+        "slug": "the-huns-esports-vs-jijiehao-06-05-2025",
+        "tier": "a",
+        "round": "Upper bracket semifinal",
+        "stage": "Asian Champions League 2025 Group A",
+        "bo_type": 3,
+        "start_date": "2025-05-06T06:40:00.000+00:00",
+        "team1_slug": "the-huns-esports",
+        "team2_slug": "jijiehao"
+    }
+]
