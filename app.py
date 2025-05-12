@@ -26,7 +26,7 @@ oauth.register(
 app.oauth = oauth
 
 db.init_app(app)
-CORS(app, origins=[os.getenv('FRONTEND_URL')])
+CORS(app, origins=[os.getenv('FRONTEND_URL')], supports_credentials=True)
 register_blueprints(app)
 
 with app.app_context():
