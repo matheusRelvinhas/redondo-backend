@@ -1,6 +1,8 @@
 import os
+import threading
 from flask import Flask
 from flask_cors import CORS
+from flask_caching import Cache
 from models import db
 from routes.register_blueprints import register_blueprints
 from dotenv import load_dotenv
@@ -14,6 +16,10 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['GOOGLE_CLIENT_ID'] = os.getenv('GOOGLE_CLIENT_ID')
 app.config['GOOGLE_CLIENT_SECRET'] = os.getenv('GOOGLE_CLIENT_SECRET')
 app.secret_key = os.getenv('GOOGLE_CLIENT_SECRET')
+
+app.config['CACHE_TYPE'] = 'SimpleCache'
+app.config['CACHE_DEFAULT_TIMEOUT'] = 300        
+cache = Cache(app)
 
 oauth = OAuth(app)
 oauth.register(
@@ -36,5 +42,12 @@ with app.app_context():
     except Exception as e:
         print(f"Error create tables: {e}")
 
+app.cache = cache
+
 if __name__ == '__main__':
-    app.run(debug=os.getenv('FLASK_DEBUG') == 'True', port=int(os.getenv('FLASK_RUN_PORT')))
+    app.run(
+        debug=os.getenv('FLASK_DEBUG') == 'True',
+        port=int(os.getenv('FLASK_RUN_PORT')),
+        threaded=True,
+        use_reloader=False
+    )

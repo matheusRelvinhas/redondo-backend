@@ -148,7 +148,26 @@ class PlayerStatsBase(db.Model):
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        exclude_fields = {"player_id", "image_url", "region_id"}
+        data = {
+            c.name: getattr(self, c.name)
+            for c in self.__table__.columns
+            if c.name not in exclude_fields
+        }
+        team_slug = None
+        team_name = None
+        team_points = None
+        if self.team_id:
+            team = TeamsStats.query.filter_by(team_id=self.team_id).first()
+            if team:
+                team_slug = team.slug
+                team_name = team.team_name
+                team_points = team.points
+        data["team_slug"] = team_slug
+        data["team_name"] = team_name
+        data["team_points"] = team_points
+        return data
+    
     
 class PlayerStatsLastMonth(PlayerStatsBase):
     __tablename__ = 'player_stats_last_month'
