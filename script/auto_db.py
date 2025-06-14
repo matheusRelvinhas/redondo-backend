@@ -10,7 +10,7 @@ import gzip
 from io import BytesIO
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from models import  TeamsStats, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo, GamesInfo, db
+from models import  TeamsInfo, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo, GamesInfo, db
 from app import app
 from datetime import datetime, timedelta
 import requests
@@ -52,8 +52,8 @@ def safe_get(obj, *keys):
             return None
     return obj
 
-def addOrAttTeamsStats(t):
-    team = TeamsStats.query.filter_by(team_id=t["team"]["id"]).first()
+def addOrAttTeamsInfo(t):
+    team = TeamsInfo.query.filter_by(team_id=t["team"]["id"]).first()
     team_data = {
         "team_id": safe_get(t, "team", "id"),
         "team_name": safe_get(t, "team_name"),
@@ -67,14 +67,14 @@ def addOrAttTeamsStats(t):
         "image_url": safe_get(t, "team", "image_url"),
     }
     if not team:
-        team = TeamsStats(**team_data)
+        team = TeamsInfo(**team_data)
         db.session.add(team)
     else:
         for key, value in team_data.items():
             setattr(team, key, value)
     db.session.commit()
 
-def getTeamsStats():
+def getTeamsInfo():
     count_restart = 0
     for page in range(1, TEAMS_MAX_PAGES + 1):
         print(f"\n🌐 Acessando Valve - página times {page}")
@@ -90,7 +90,7 @@ def getTeamsStats():
                     json_data = f.read().decode("utf-8")
                 data = json.loads(json_data)   
                 for t in data["results"]:
-                    addOrAttTeamsStats(t)
+                    addOrAttTeamsInfo(t)
                 print(f"Banco de dados atualizado, 📄 Dados JSON")
         count_restart += 1
         if count_restart >= MAX_COUNTS_RESTART:
@@ -255,7 +255,7 @@ def addOrAttLeaguesInfo(l):
     if not league:
         league = LeaguesInfo(**league_data)
         db.session.add(league)
-    else:
+    else:      
         for key, value in league_data.items():
             setattr(league, key, value)
     db.session.commit()
@@ -609,17 +609,25 @@ def send_telegram(msg):
 
 def run_tasks():
     tasks = [
-        getGamesFinishedInfo,
-        getGamesFinishedStats,
         lambda: getLeaguesInfo('current'),
         lambda: getLeaguesInfo('finished'),
         lambda: getLeaguesGamesRounds('current'),
         lambda: getLeaguesGamesRounds('finished'),
-        getTeamsStats,
+        getGamesFinishedInfo,
+        getGamesFinishedStats,
+        getTeamsInfo,
         *[lambda p=period: getPlayersStats(p) for period in PERIODS],
     ]
     for task in tasks:
-        task()
+        global driver
+        if not driver:
+            driver = restart_driver()
+        try:
+            task()
+        except Exception as e:
+            print(f"⚠️ Erro na tarefa {task.__name__ if hasattr(task, '__name__') else task}: {e}")
+            raise
+
 
 TEMP_PROFILE_DIR = "./chrome_temp_profile"
 
@@ -659,13 +667,12 @@ def get_chrome_options():
 def kill_chrome_processes():
     system = platform.system()
     if system == "Windows":
-        print('Developemnt not kill proccess')
-        #os.system("taskkill /f /im chrome.exe >nul 2>&1")
-        #os.system("taskkill /f /im chromedriver.exe >nul 2>&1")
+        print('Development not kill proccess')
+        os.system("taskkill /f /im chrome.exe >nul 2>&1")
+        os.system("taskkill /f /im chromedriver.exe >nul 2>&1")
     else:
-        print('Developemnt not kill proccess')
-        #os.system("pkill chrome > /dev/null 2>&1")
-        #os.system("pkill chromedriver > /dev/null 2>&1")
+        os.system("pkill chrome > /dev/null 2>&1")
+        os.system("pkill chromedriver > /dev/null 2>&1")
 
 def restart_driver(show_log=True):
     global driver, service
@@ -695,6 +702,7 @@ def run_automation():
     with app.app_context():
         try:
             driver = restart_driver()
+            time.sleep(3)
             print(f"\n🕒 Execução iniciada: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             run_tasks()
             print("✅ Todas tarefas concluídas com sucesso.")

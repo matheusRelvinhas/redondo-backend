@@ -18,8 +18,8 @@ class User(db.Model, UserMixin):
     created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
 
-class TeamsStats(db.Model):
-    __tablename__ = 'teams_stats'
+class TeamsInfo(db.Model):
+    __tablename__ = 'teams_Info'
 
     id = db.Column(db.Integer, primary_key=True)
     team_id = db.Column(db.Integer, nullable=False)
@@ -37,7 +37,12 @@ class TeamsStats(db.Model):
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        excluded_fields = {'team_id', 'image_url', 'team_valve_rankings_players'}
+        return {
+            c.name: getattr(self, c.name)
+            for c in self.__table__.columns
+            if c.name not in excluded_fields
+        }
 
 class PlayerStatsBase(db.Model):
     __abstract__ = True
@@ -158,7 +163,7 @@ class PlayerStatsBase(db.Model):
         team_name = None
         team_points = None
         if self.team_id:
-            team = TeamsStats.query.filter_by(team_id=self.team_id).first()
+            team = TeamsInfo.query.filter_by(team_id=self.team_id).first()
             if team:
                 team_slug = team.slug
                 team_name = team.team_name
@@ -202,7 +207,46 @@ class LeaguesInfo(db.Model):
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        excluded_fields = {'league_id', 'pickem_presence', 'image_url'}
+        result = {}
+        for column in self.__table__.columns:
+            if column.name in excluded_fields:
+                continue
+            value = getattr(self, column.name)
+                # Limpa o array "teams"
+            if column.name == 'teams' and isinstance(value, list):
+                filtered_teams = []
+                for team in value:
+                    if isinstance(team, dict):
+                        filtered_team = {k: v for k, v in team.items() if k not in {'id', 'image_url'}}
+                        filtered_teams.append(filtered_team)
+                result['teams'] = filtered_teams
+
+            # Limpa "tournament_prizes" → "teams"
+            elif column.name == 'tournament_prizes' and isinstance(value, list):
+                cleaned_prizes = []
+                for item in value:
+                    if isinstance(item, dict):
+                        new_item = item.copy()
+                        if isinstance(new_item.get("teams"), dict):
+                            new_item["teams"] = {
+                                k: v for k, v in new_item["teams"].items()
+                                if k not in {'id', 'image_url'}
+                            }
+                        cleaned_prizes.append(new_item)
+                result['tournament_prizes'] = cleaned_prizes
+
+            else:
+                result[column.name] = value
+        if self.start_date:
+            try:
+                dt = datetime.fromisoformat(self.start_date.replace('Z', '+00:00'))
+                result["timestamp"] = int(dt.timestamp())
+            except Exception:
+                result["timestamp"] = None
+        else:
+            result["timestamp"] = None
+        return result
 
 class GamesInfo(db.Model):
     __tablename__ = 'games_info'

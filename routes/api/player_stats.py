@@ -11,7 +11,7 @@ def player_stats():
     game_count = request.args.get('game_count')
     if not period or not game_count:
         return responseApi({"error": "missing_arguments"}, 400)
-    cache_key = f"stats::{period}::{game_count}"
+    cache_key = f"stats_player::{period}::{game_count}"
     cached = current_app.cache.get(cache_key)
     if cached:
         return responseApi(cached, 200)
@@ -34,7 +34,7 @@ def player_image():
     period = request.args.get('period')
     if not slug:
         return responseApi({"error": "missing_slug"}, 400)
-    cache_key = f"image::{slug}::{period or 'all'}"
+    cache_key = f"image_player::{slug}::{period or 'all'}"
     cached_img = current_app.cache.get(cache_key)
     if cached_img:
         return Response(cached_img, mimetype="image/webp")
@@ -49,11 +49,9 @@ def player_image():
         model = model_map.get(period)
         if not model:
             return responseApi({"error": "invalid_period"}, 400)
-        print(">> BUSCANDO DO BANCO")
         player = model.query.filter_by(slug=slug).first()
     else:
         for model in model_map.values():
-            print(">> BUSCANDO DO BANCO")
             player = model.query.filter_by(slug=slug).first()
             if player:
                 break
