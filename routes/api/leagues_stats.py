@@ -35,7 +35,7 @@ def get_leagues():
                 league_ts = int(start_dt.timestamp())
                 if league_year in years:
                     if status == 'upcoming' and league_ts < now_timestamp:
-                        continue  # ignora ligas com data passada
+                        continue
                     filtered_leagues.append(league)
             except Exception:
                 continue

@@ -38,11 +38,16 @@ class TeamsInfo(db.Model):
 
     def to_dict(self):
         excluded_fields = {'team_id', 'image_url', 'team_valve_rankings_players'}
-        return {
+        result = {
             c.name: getattr(self, c.name)
             for c in self.__table__.columns
             if c.name not in excluded_fields
         }
+        if self.image_url and '.' in self.image_url:
+            result['img_extension'] = self.image_url.rsplit('.', 1)[-1].lower()
+        else:
+            result['img_extension'] = None
+        return result
 
 class PlayerStatsBase(db.Model):
     __abstract__ = True
@@ -159,6 +164,10 @@ class PlayerStatsBase(db.Model):
             for c in self.__table__.columns
             if c.name not in exclude_fields
         }
+        if self.image_url and '.' in self.image_url:
+            data["img_extension"] = self.image_url.rsplit('.', 1)[-1].lower()
+        else:
+            data["img_extension"] = None
         team_slug = None
         team_name = None
         team_points = None
@@ -196,56 +205,59 @@ class LeaguesInfo(db.Model):
     status = db.Column(db.String(100), nullable=True)
     prize = db.Column(db.Integer, nullable=True)
     start_date = db.Column(db.String(100), nullable=True)
+    start_timestamp = db.Column(db.Integer, nullable=True)
     tier = db.Column(db.String(10), nullable=True)
-    pickem_presence = db.Column(db.Boolean, nullable=True)
     image_url = db.Column(db.String(250), nullable=True)
     teams = db.Column(db.JSON, nullable=True)
     tournament_prizes = db.Column(db.JSON, nullable=True)
-    stage_rounds = db.Column(db.JSON, nullable=True)
 
     created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
 
     def to_dict(self):
-        excluded_fields = {'league_id', 'pickem_presence', 'image_url'}
+        excluded_fields = {'league_id', 'image_url'}
         result = {}
         for column in self.__table__.columns:
             if column.name in excluded_fields:
                 continue
             value = getattr(self, column.name)
-                # Limpa o array "teams"
             if column.name == 'teams' and isinstance(value, list):
                 filtered_teams = []
                 for team in value:
                     if isinstance(team, dict):
-                        filtered_team = {k: v for k, v in team.items() if k not in {'id', 'image_url'}}
+                        filtered_team = {
+                            k: v for k, v in team.items() if k not in {'id', 'image_url'}
+                        }
+                        if 'image_url' in team and isinstance(team['image_url'], str):
+                            ext = team['image_url'].rsplit('.', 1)[-1].lower()
+                            filtered_team['img_extension'] = ext
+                        else:
+                            filtered_team['img_extension'] = None
                         filtered_teams.append(filtered_team)
                 result['teams'] = filtered_teams
-
-            # Limpa "tournament_prizes" → "teams"
             elif column.name == 'tournament_prizes' and isinstance(value, list):
                 cleaned_prizes = []
                 for item in value:
                     if isinstance(item, dict):
                         new_item = item.copy()
                         if isinstance(new_item.get("teams"), dict):
-                            new_item["teams"] = {
-                                k: v for k, v in new_item["teams"].items()
-                                if k not in {'id', 'image_url'}
+                            filtered_team = {
+                                k: v for k, v in new_item["teams"].items() if k not in {'id', 'image_url'}
                             }
+                            if 'image_url' in new_item["teams"] and isinstance(new_item["teams"]['image_url'], str):
+                                ext = new_item["teams"]['image_url'].rsplit('.', 1)[-1].lower()
+                                filtered_team['img_extension'] = ext
+                            else:
+                                filtered_team['img_extension'] = None
+                            new_item["teams"] = filtered_team
                         cleaned_prizes.append(new_item)
                 result['tournament_prizes'] = cleaned_prizes
-
             else:
                 result[column.name] = value
-        if self.start_date:
-            try:
-                dt = datetime.fromisoformat(self.start_date.replace('Z', '+00:00'))
-                result["timestamp"] = int(dt.timestamp())
-            except Exception:
-                result["timestamp"] = None
+        if self.image_url and '.' in self.image_url:
+            result['img_extension'] = self.image_url.rsplit('.', 1)[-1].lower()
         else:
-            result["timestamp"] = None
+            result['img_extension'] = None
         return result
 
 class GamesInfo(db.Model):
@@ -261,18 +273,71 @@ class GamesInfo(db.Model):
     tier = db.Column(db.String(10), nullable=True)
     start_date = db.Column(db.String(100), nullable=True)
     end_date = db.Column(db.String(100), nullable=True)
+    start_timestamp = db.Column(db.Integer, nullable=True)
+    end_timestamp = db.Column(db.Integer, nullable=True)
     team1_id = db.Column(db.Integer, nullable=False)
     team2_id = db.Column(db.Integer, nullable=False)
     team1_score = db.Column(db.Integer, nullable=True)
     team2_score= db.Column(db.Integer, nullable=True)
-    live_coverage = db.Column(db.Boolean, nullable=True)
     league_id = db.Column(db.Integer, nullable=True)
     games = db.Column(db.JSON, nullable=True)
+    games_score = db.Column(db.JSON, nullable=True)
+    stage_round = db.Column(db.JSON, nullable=True)
     players_stats = db.Column(db.JSON, nullable=True)
-    maps_players_stats = db.Column(db.JSON, nullable=True) 
+    maps = db.Column(db.JSON, nullable=True)
+    maps_players_stats = db.Column(db.JSON, nullable=True)
 
     created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        exclude_fields = {"game_id", "league_id", "team1_id", "team2_id", "winner_team_id", "games", "players_stats", "maps_players_stats"}
+        data = {
+            c.name: getattr(self, c.name)
+            for c in self.__table__.columns
+            if c.name not in exclude_fields
+        }
+        league_name = None
+        league_slug = None
+        league_img_extension = None
+        if self.league_id:
+            league = LeaguesInfo.query.filter_by(league_id=self.league_id).first()
+            if league:
+                league_name = league.name
+                league_slug = league.slug
+                if league.image_url and "." in league.image_url:
+                    league_img_extension = league.image_url.rsplit(".", 1)[-1]
+        data["league_name"] = league_name
+        data["league_slug"] = league_slug
+        data["league_img_extension"] = league_img_extension
+        team1_name = None
+        team1_slug = None
+        team1_img_extension = None
+        team2_name = None
+        team2_slug = None
+        team2_img_extension = None
+        winner_team_slug = None
+        team1 = TeamsInfo.query.filter_by(team_id=self.team1_id).first()
+        if team1:
+            team1_name = team1.team_name
+            team1_slug = team1.slug
+            if team1.image_url and "." in team1.image_url:
+                team1_img_extension = team1.image_url.rsplit(".", 1)[-1]
+        team2 = TeamsInfo.query.filter_by(team_id=self.team2_id).first()
+        if team2:
+            team2_name = team2.team_name
+            team2_slug = team2.slug
+            if team2.image_url and "." in team2.image_url:
+                team2_img_extension = team2.image_url.rsplit(".", 1)[-1]
+        if self.winner_team_id:
+            winner_team = TeamsInfo.query.filter_by(team_id=self.winner_team_id).first()
+            if winner_team:
+                winner_team_slug = winner_team.slug
+        data["team1_name"] = team1_name
+        data["team1_slug"] = team1_slug
+        data["team1_img_extension"] = team1_img_extension
+        data["team2_name"] = team2_name
+        data["team2_slug"] = team2_slug
+        data["team2_img_extension"] = team2_img_extension
+        data["winner_team_slug"] = winner_team_slug
+        return data

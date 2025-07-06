@@ -1,5 +1,5 @@
 from flask import Flask
-from routes.api import login, player_stats, teams_stats, leagues_stats
+from routes.api import login, player_stats, teams_stats, leagues_stats, games_stats
 
 def register_blueprints(app: Flask):
 
@@ -10,3 +10,5 @@ def register_blueprints(app: Flask):
     app.register_blueprint(teams_stats.bp)
 
     app.register_blueprint(leagues_stats.bp)
+
+    app.register_blueprint(games_stats.bp)
