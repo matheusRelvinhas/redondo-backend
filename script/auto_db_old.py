@@ -1,3 +1,4 @@
+import os
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -8,41 +9,14 @@ import json
 import gzip
 from io import BytesIO
 import sys
-import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from models import  TeamsStats, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo, GamesInfo, db
+from models import  TeamsInfo, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo, GamesInfo, db
 from app import app
 from datetime import datetime, timedelta
 import requests
 import re
 from sqlalchemy import or_, and_
-
-chrome_options = Options()
-chrome_options.add_argument("--start-maximized")
-chrome_options.add_argument("--headless=new")
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
-chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-chrome_options.add_argument("--disable-extensions")
-chrome_options.add_argument("--disable-notifications")
-chrome_options.add_argument("--disable-logging")
-chrome_options.add_argument("--no-default-browser-check")
-chrome_options.add_argument("--disable-accelerated-2d-canvas")
-chrome_options.add_argument("--disable-accelerated-video-decode")
-chrome_options.add_argument("--blink-settings=imagesEnabled=false")
-chrome_options.add_argument("--remote-debugging-port=9222")
-chrome_options.add_argument("--disable-xnnpack")
-chrome_options.add_argument("--disable-speech-api")
-chrome_options.add_argument("--incognito") 
-chrome_options.add_argument("--disable-background-networking")
-chrome_options.add_argument("--disable-background-timer-throttling")
-chrome_options.add_argument("--disable-client-side-phishing-detection")
-chrome_options.add_argument("--disable-sync")
-chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-chrome_options.add_experimental_option("useAutomationExtension", False)
-
-service = Service(ChromeDriverManager().install())
+import platform
 
 PERIODS = ["last_month" ,"last_3_months", "last_6_months", "last_12_months"]
 
@@ -78,21 +52,8 @@ def safe_get(obj, *keys):
             return None
     return obj
 
-def restart_driver(show_log=True):
-    if show_log:
-        print("🔄 Reiniciando driver preventivamente (memória)...")
-    global driver
-    try:
-        if driver:
-            driver.quit()
-    except Exception as e:
-        print(f"Erro ao fechar o driver: {e}")
-    finally:
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-    return driver
-
-def addOrAttTeamsStats(t):
-    team = TeamsStats.query.filter_by(team_id=t["team"]["id"]).first()
+def addOrAttTeamsInfo(t):
+    team = TeamsInfo.query.filter_by(team_id=t["team"]["id"]).first()
     team_data = {
         "team_id": safe_get(t, "team", "id"),
         "team_name": safe_get(t, "team_name"),
@@ -106,18 +67,18 @@ def addOrAttTeamsStats(t):
         "image_url": safe_get(t, "team", "image_url"),
     }
     if not team:
-        team = TeamsStats(**team_data)
+        team = TeamsInfo(**team_data)
         db.session.add(team)
     else:
         for key, value in team_data.items():
             setattr(team, key, value)
     db.session.commit()
 
-def getTeamsStats():
+def getTeamsInfo():
     count_restart = 0
     for page in range(1, TEAMS_MAX_PAGES + 1):
         print(f"\n🌐 Acessando Valve - página times {page}")
-        url = f"https://bo3.gg/pt/teams/valve-rankings/world?valve_ranking_date=2025-04-07&page={page}"
+        url = f"https://bo3.gg/pt/teams/valve-rankings/world?page={page}"
         driver.get(url)
         time.sleep(DEFAULT_SLEEP)
         for request in driver.requests:
@@ -129,7 +90,7 @@ def getTeamsStats():
                     json_data = f.read().decode("utf-8")
                 data = json.loads(json_data)   
                 for t in data["results"]:
-                    addOrAttTeamsStats(t)
+                    addOrAttTeamsInfo(t)
                 print(f"Banco de dados atualizado, 📄 Dados JSON")
         count_restart += 1
         if count_restart >= MAX_COUNTS_RESTART:
@@ -294,7 +255,7 @@ def addOrAttLeaguesInfo(l):
     if not league:
         league = LeaguesInfo(**league_data)
         db.session.add(league)
-    else:
+    else:      
         for key, value in league_data.items():
             setattr(league, key, value)
     db.session.commit()
@@ -349,21 +310,30 @@ def getLeaguesGamesRounds(status):
     for league in filtered_leagues:
         stage_rounds = []
         print(f"\n🌐 Acessando liga - {league.slug} - {status}")
-        print(league.slug)
         url = f"https://bo3.gg/pt/tournaments/{league.slug}/{'results' if status=='finished' else 'matches'}"
         driver.get(url)
         time.sleep(DEFAULT_SLEEP)
+    for league in filtered_leagues:
+        # Inicializa com os rounds já existentes, se houver
+        stage_rounds = league.stage_rounds if hasattr(league, "stage_rounds") and isinstance(league.stage_rounds, list) else []
+
+        print(f"\n🌐 Acessando liga - {league.slug} - {status}")
+        url = f"https://bo3.gg/pt/tournaments/{league.slug}/{'results' if status=='finished' else 'matches'}"
+        driver.get(url)
+        time.sleep(DEFAULT_SLEEP)
+
         for request in driver.requests:
-            if request.response and LEAGUES_STAGE_API_URL_PART in request.url:
+            if request.response and LEAGUES_STAGE_API_URL_PART in request.url and 'stage' in request.url:
                 print(f"\n🔗 URL da requisição interceptada: {request.url}")
                 print(f"📦 Status: {request.response.status_code}")
                 compressed = BytesIO(request.response.body)
                 with gzip.GzipFile(fileobj=compressed) as f:
                     json_data = f.read().decode("utf-8")
                 data = json.loads(json_data)
+
                 for l in data["results"]:
                     if safe_get(l, "tournament", "slug") == league.slug:
-                        slug = safe_get(l, "slug")
+                        slug = safe_get(l, "slug")   
                         stage = safe_get(l, "stage", "title") or safe_get(l, "round", "stages")
                         round_name = safe_get(l, "round", "name")
                         if slug and RANDOM_ID_SLUG_PATTERN.match(slug):
@@ -381,7 +351,7 @@ def getLeaguesGamesRounds(status):
                             }
                             exists = False
                             for i, existing_round in enumerate(stage_rounds):
-                                if existing_round["slug"] == slug:
+                                if existing_round.get("slug") == slug:
                                     stage_rounds[i] = new_stage_round
                                     exists = True
                                     break
@@ -645,7 +615,6 @@ def send_telegram(msg):
     except Exception as e:
         print("Erro ao tentar enviar mensagem para o Telegram:", e)
 
-driver = None
 
 def run_tasks():
     tasks = [
@@ -653,21 +622,97 @@ def run_tasks():
         lambda: getLeaguesInfo('finished'),
         lambda: getLeaguesGamesRounds('current'),
         lambda: getLeaguesGamesRounds('finished'),
-        getTeamsStats,
         getGamesFinishedInfo,
         getGamesFinishedStats,
+        getTeamsInfo,
         *[lambda p=period: getPlayersStats(p) for period in PERIODS],
     ]
     for task in tasks:
-        task()
+        global driver
+        if not driver:
+            driver = restart_driver()
+        try:
+            task()
+        except Exception as e:
+            print(f"⚠️ Erro na tarefa {task.__name__ if hasattr(task, '__name__') else task}: {e}")
+            raise
 
+
+TEMP_PROFILE_DIR = "./chrome_temp_profile"
+
+service = None
+driver = None
 fail_count = 0
 
+def get_chrome_options():
+    chrome_options = Options()
+    chrome_options.add_argument("--start-maximized")
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-notifications")
+    chrome_options.add_argument("--disable-logging")
+    chrome_options.add_argument("--no-default-browser-check")
+    chrome_options.add_argument("--disable-accelerated-2d-canvas")
+    chrome_options.add_argument("--disable-accelerated-video-decode")
+    chrome_options.add_argument("--blink-settings=imagesEnabled=false")
+    chrome_options.add_argument("--remote-debugging-port=9222")
+    chrome_options.add_argument("--disable-xnnpack")
+    chrome_options.add_argument("--disable-speech-api")
+    chrome_options.add_argument("--incognito") 
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--disable-background-timer-throttling")
+    chrome_options.add_argument("--disable-client-side-phishing-detection")
+    chrome_options.add_argument("--disable-sync")
+    chrome_options.add_argument("--disable-logging")
+    chrome_options.add_argument("--log-level=3")
+    chrome_options.add_experimental_option('excludeSwitches', ['disable-default-browser-check', 'enable-logging'])
+    chrome_options.add_argument("--silent")
+    return chrome_options
+
+def kill_chrome_processes():
+    system = platform.system()
+    if system == "Windows":
+        #print('Development not kill proccess')
+        os.system("taskkill /f /im chrome.exe >nul 2>&1")
+        os.system("taskkill /f /im chromedriver.exe >nul 2>&1")
+    else:
+        print('Development not kill proccess')
+        #os.system("pkill chrome > /dev/null 2>&1")
+        #os.system("pkill chromedriver > /dev/null 2>&1")
+
+def restart_driver(show_log=True):
+    global driver, service
+    if show_log:
+        print(f"\n🔄 Reiniciando driver preventivamente (limpeza completa)... [{datetime.now().strftime('%H:%M:%S')}]")
+    try:
+        if driver:
+            driver.quit()
+    except Exception as e:
+        print(f"⚠️ Erro ao fechar o driver: {e}")
+    try:
+        kill_chrome_processes()
+    except Exception as e:
+        print(f"⚠️ Erro ao matar processos: {e}")
+    try:
+        if service:
+            service.stop()
+    except Exception:
+        pass
+    service = Service(ChromeDriverManager().install(), log_output=os.devnull)
+    driver = webdriver.Chrome(service=service, options=get_chrome_options())
+    print(f"✅ Driver iniciado com sucesso. [{datetime.now().strftime('%H:%M:%S')}]")
+    return driver
+
 def run_automation():
-    global driver, fail_count, service
+    global driver, fail_count
     with app.app_context():
         try:
-            driver = restart_driver(False)
+            driver = restart_driver()
+            time.sleep(3)
             print(f"\n🕒 Execução iniciada: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             run_tasks()
             print("✅ Todas tarefas concluídas com sucesso.")
@@ -693,12 +738,5 @@ while True:
         time.sleep(30 * DEFAULT_SLEEP_INTERVAL)
     else:
         wait_time = min(fail_count * 5, 300)
-        print(f"⏳ Aguardando {wait_time}s antes de tentar novamente.")
+        print(f"⏳ Aguardando {wait_time}s antes de tentar novamente...")
         time.sleep(wait_time)
-        if fail_count % 3 == 0:
-            print("🔄 Reinicializando o serviço do ChromeDriver...")
-            try:
-                service.stop()
-            except Exception:
-                pass
-            service = Service(ChromeDriverManager().install())

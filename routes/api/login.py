@@ -99,7 +99,7 @@ def logout():
 def check_auth():
     token = request.args.get('token')
     user = get_access_and_user(token)
-    if user:
+    if isinstance(user, User):
         return responseApi(
             {
                 "message": "authenticated", 
