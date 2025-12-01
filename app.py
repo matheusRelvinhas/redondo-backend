@@ -1,5 +1,4 @@
 import os
-import threading
 from flask import Flask
 from flask_cors import CORS
 from flask_caching import Cache

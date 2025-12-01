@@ -2,6 +2,8 @@ import os
 import sys
 import requests
 import time
+import traceback
+import math
 from datetime import datetime, timedelta, timezone
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models import db, GamesInfo, TeamsInfo, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo
@@ -12,8 +14,8 @@ API_FINISHED_GAME_PART = "https://api.bo3.gg/api/v2/matches/finished?utc_offset=
 API_UPCOMING_GAME_PART = "https://api.bo3.gg/api/v2/matches/upcoming?utc_offset=-10800&filter[tier][in]=s,a&filter[discipline_id][eq]=1&date="
 API_LIVE_GAME_PART = "https://api.bo3.gg/api/v2/matches/live?utc_offset=-10800&filter[tier][in]=s,a&filter[discipline_id][eq]=1&date="
 API_GAME_STATS_PART = "https://api.bo3.gg/api/v1/matches/"
-API_MAP_GAME_STATS_PART = "https://api.bo3.gg/api/v1/games"
-API_VALVE_RANKINK_PART = "https://api.bo3.gg/api/v1/teams/rankings/valve?scope=widget-teams-valve-rankings&sort=rank&filter[current][eq]=true&filter[region_str][eq]=world&with=team,team_valve_rankings_players"
+API_MAP_GAME_STATS_PART = "https://api.bo3.gg/api/v1/games/"
+API_VALVE_RANKINK_PART = "https://api.bo3.gg/api/v2/team_rankings?filter[discipline_id][eq]=1"
 API_TEAM_PART = "https://api.bo3.gg/api/v1/teams/earnings?filter[teams.discipline_id][eq]=1&with=country,active_players"
 API_PLAYER_INFO_PART = "https://api.bo3.gg/api/v1/players/tops?sort=-avg_player_rating&filter[tournament_tier_rank][in]=1,2&filter[games_count][gte]=1"
 API_FINISHED_LEAGUE_INFO_PART = "https://api.bo3.gg/api/v1/tournaments?scope=index-finished-tournaments&sort=-end_date&filter[tournaments.status][in]=finished&filter[tournaments.tier][in]=s,a&filter[tournaments.discipline_id][eq]=1&with=teams,tournament_prizes"
@@ -32,16 +34,22 @@ def safe_get(obj, *keys):
             return None
     return obj
 
-def get_range(api_url, limit):
+def get_range(api_url, limit, new_range=False):
     max_range = None
     url_range = f"{api_url}&page[offset]=0&page[limit]={limit}"
+    if new_range:
+        url_range = f"{api_url}&page=1&per_page={limit}"
     print(f"Getting range: {url_range}")
-    try: 
+    try:
         range_response = requests.get(url_range, timeout=60)
         range_response.raise_for_status()
         range_data = range_response.json()
-        if safe_get(range_data, "total", "count"):
-            max_range = safe_get(range_data, "total", "count") + (limit+1)
+        if new_range:
+            if safe_get(range_data, "meta", "total_count"):
+                max_range = safe_get(range_data, "meta", "total_count") + (limit+1)
+        else:
+            if safe_get(range_data, "total", "count"):
+                max_range = safe_get(range_data, "total", "count") + (limit+1)
         return max_range
     except requests.RequestException as e:
         print(f"Error accessing {url_range}: {e}")
@@ -144,7 +152,9 @@ def games_live_info(count=20):
             time.sleep(90)
 
 def games_stage_round():
-    games = db.session.query(GamesInfo).filter(or_(GamesInfo.stage_round == None, GamesInfo.games_score == None)).all()
+    games = db.session.query(GamesInfo).filter(
+        or_(GamesInfo.stage_round == None, GamesInfo.games_score == None)
+    ).all()
     for game in games:
         url = f"{API_GAME_STATS_PART}{game.slug}?scope=show-match&stream_language=en&with=games,teams,tournament_deep,stage,ai_predictions"
         print(f"Accessing: {url}")
@@ -152,20 +162,21 @@ def games_stage_round():
             response = requests.get(url, timeout=60)
             response.raise_for_status()
             data = response.json()
-            gs_score = safe_get(data, "games")
-            games_score = []
-            if gs_score:
-                for g_score in gs_score:
-                    game_score = {
-                        "map_name": (safe_get(g_score, "map_name")),
-                        "order": (safe_get(g_score, "number")),
-                        "rounds_count": (safe_get(g_score, "rounds_count")),
-                        "winner_score": (safe_get(g_score, "winner_clan_score")),
-                        "loser_score": (safe_get(g_score, "loser_clan_score")),
-                        "winner_team": (safe_get(g_score, "winner_team_clan", "team", "slug")),
-                    }
-                    games_score.append(game_score)
-                game.games_score = games_score
+            if game.status == 'finished':
+                gs_score = safe_get(data, "games")
+                games_score = []
+                if gs_score:
+                    for g_score in gs_score:
+                        game_score = {
+                            "map_name": (safe_get(g_score, "map_name")),
+                            "order": (safe_get(g_score, "number")),
+                            "rounds_count": (safe_get(g_score, "rounds_count")),
+                            "winner_score": (safe_get(g_score, "winner_clan_score")),
+                            "loser_score": (safe_get(g_score, "loser_clan_score")),
+                            "winner_team": (safe_get(g_score, "winner_team_clan", "team", "slug")),
+                        }
+                        games_score.append(game_score)
+                    game.games_score = games_score
             stage_title = safe_get(data, "stage", "title")
             round_name = safe_get(data, "round", "name")
             if stage_title and round_name:
@@ -182,14 +193,14 @@ def addOrAttTeamsInfoValve(t):
     team = TeamsInfo.query.filter_by(slug=safe_get(t, "team", "slug")).first()
     team_data = {
         "team_id": safe_get(t, "team", "id"),
-        "team_name": safe_get(t, "team_name"),
+        "team_name": safe_get(t, "team", "name"),
         "slug": safe_get(t, "team", "slug"),
-        "points": safe_get(t, "points"),
+        "points": safe_get(t, "score"),
         "rank": safe_get(t, "rank"),
         "country_name": safe_get(t, "team", "country", "name"),
         "country_code": safe_get(t, "team", "country", "code"),
-        "region_code": safe_get(t, "region_code"),
-        "team_valve_rankings_players": safe_get(t, "team_valve_rankings_players"),
+        "region_code": safe_get(t, "region"),
+        "team_valve_rankings_players": safe_get(t, "roster_players"),
         "image_url": safe_get(t, "team", "image_url"),
     }
     if not team:
@@ -201,15 +212,16 @@ def addOrAttTeamsInfoValve(t):
     db.session.commit()
 
 def team_info_valve_ranking():
-    max_range = get_range(API_VALVE_RANKINK_PART, 30)
-    for offset in range(0, max_range, 30):
-        url = f"{API_VALVE_RANKINK_PART}&page[offset]={offset}&page[limit]=30"
+    total_items = get_range(API_VALVE_RANKINK_PART, 30, True)
+    total_pages = math.ceil(total_items / 30)
+    for page in range(1, total_pages):
+        url = f"{API_VALVE_RANKINK_PART}&page={page}&per_page=30"
         print(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
             data = response.json()
-            teams = safe_get(data, "results")
+            teams = safe_get(data, "data")
             for team in teams:
                 addOrAttTeamsInfoValve(team)
         except requests.RequestException as e:
@@ -475,8 +487,28 @@ def playerStatsData(p, map_stats):
         playerData["cumulative_round_damages"] = p.get('cumulative_round_damages')
     return playerData
 
+def shortPlayerStatsData(shortPlayersStats):
+    short_players_stats = []
+    for p in shortPlayersStats:
+        playerData = {
+            "name": safe_get(p, "player", "nickname"),
+            "slug": safe_get(p, "player", "slug"),
+            "country_code": safe_get(p, "player", "country", "code"),
+            "team_name": safe_get(p, "team", "name"),
+            "team_slug": safe_get(p, "team", "slug"),
+            "steam_game_ids": safe_get(p, "game_ids"),
+            "kills": safe_get(p, "kills_sum"),
+            "death": safe_get(p, "death_sum"),
+            "assists": safe_get(p, "assists_sum")
+        }
+        short_players_stats.append(playerData)
+    return short_players_stats
+
 def games_players_stats():
-    games = db.session.query(GamesInfo).filter(or_(GamesInfo.players_stats == None, GamesInfo.maps == None, GamesInfo.maps_players_stats == None))
+    games = db.session.query(GamesInfo).filter(
+        or_(GamesInfo.players_stats == None, GamesInfo.maps == None, GamesInfo.maps_players_stats == None),
+        GamesInfo.status == 'finished'
+    )
     for game in games:
         url = f"{API_GAME_STATS_PART}{game.slug}/players_stats"
         print(f"Accessing: {url}")
@@ -505,7 +537,7 @@ def games_players_stats():
                 maps_p = []
                 for m in game.maps:
                     if not safe_get(m, "steam_game_id"): continue
-                    map_url = f"{API_MAP_GAME_STATS_PART}/{safe_get(m, "steam_game_id")}/players_stats"
+                    map_url = f"{API_MAP_GAME_STATS_PART}{safe_get(m, "steam_game_id")}/players_stats"
                     print(f"Accessing: {map_url}")
                     map_obj = {
                         "map_name": safe_get(m, "map_name"),
@@ -524,6 +556,46 @@ def games_players_stats():
                     maps_p.append(map_obj)
                 game.maps_players_stats = maps_p
                 db.session.commit()
+            else:
+                if (not game.short_players_stats or not game.short_maps_players_stats) and game.status=='finished' :
+                    url_maps = f"{API_GAME_STATS_PART}{game.slug}/games/"
+                    url_short = f"{API_GAME_STATS_PART}{game.slug}/short_players_stats/"
+                    response = requests.get(url_short, timeout=60)
+                    response.raise_for_status()
+                    short_maps_stats = safe_get(response.json())
+                    game.short_players_stats = shortPlayerStatsData(short_maps_stats)
+                    maps = game.games if game.games != 'null' else None
+                    if maps:
+                        p_maps = []
+                        s_maps = []
+                        for map in maps:
+                            map_name = safe_get(map, 'map_name')
+                            if not map_name: # Verifica se map_name é None ou uma string vazia
+                                continue
+                            response_m = requests.get(url_maps + map_name, timeout=60)
+                            response_m.raise_for_status()
+                            map_stats = safe_get(response_m.json())
+                            p_map = {
+                                "map_name": map_name,
+                                "steam_game_id": safe_get(map_stats, 'id'),
+                                "order": safe_get(map, "number")
+                            }
+                            print(p_map)
+                            p_maps.append(p_map)
+                            short_map_url = f"{API_MAP_GAME_STATS_PART}{safe_get(map_stats, 'id')}/short_players_stats"
+                            response_sm = requests.get(short_map_url, timeout=60)
+                            response_sm.raise_for_status()
+                            short_maps_players_stats = safe_get(response_sm.json())
+                            short_maps_players_stats = shortPlayerStatsData(short_maps_players_stats)
+                            short_map = {
+                                "map_name": map_name,
+                                "order": safe_get(map, "number"),
+                                "data": short_maps_players_stats
+                            }
+                            s_maps.append(short_map)
+                        game.maps = p_maps
+                        game.short_maps_players_stats = s_maps
+                        db.session.commit()
         except requests.RequestException as e:
             print(f"Error accessing {url}: {e}")
 
@@ -566,7 +638,13 @@ def run_auto_db_loop():
                 func()
                 success_count += 1
             except Exception as e:
-                error_msg = f"⚠️ Erro na função '{name}':\n{str(e)}"
+                tb = traceback.format_exc()
+                error_msg = (
+                    f"⚠️ Erro na função '{name}':\n"
+                    f"{str(e)}\n\n"
+                    f"📌 Traceback completo:\n{tb}"
+                )
+                print(error_msg) 
                 send_telegram(error_msg)
                 failed_functions.append(name)
         active_functions = [f for f in active_functions if f[0] not in failed_functions]

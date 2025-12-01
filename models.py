@@ -286,6 +286,8 @@ class GamesInfo(db.Model):
     players_stats = db.Column(db.JSON, nullable=True)
     maps = db.Column(db.JSON, nullable=True)
     maps_players_stats = db.Column(db.JSON, nullable=True)
+    short_players_stats = db.Column(db.JSON, nullable=True)
+    short_maps_players_stats = db.Column(db.JSON, nullable=True)
 
     created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
