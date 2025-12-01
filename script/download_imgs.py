@@ -6,7 +6,17 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app import app
 from models import db, TeamsInfo, LeaguesInfo, PlayerStats12Months, PlayerStats6Months, PlayerStats3Months, PlayerStatsLastMonth
 
-BASE_IMG_PATH = os.path.join(os.path.dirname(__file__), 'imgs')
+current_script_dir = os.path.dirname(os.path.abspath(__file__))
+backend_base_dir = os.path.dirname(os.path.dirname(current_script_dir))
+
+BASE_IMG_PATH = os.path.join(
+    backend_base_dir, 
+    'project-x', 
+    'public', 
+    'img',
+    'imgs'
+)
+
 DIRS = {
     "team": os.path.join(BASE_IMG_PATH, 'teams'),
     "league": os.path.join(BASE_IMG_PATH, 'leagues'),
@@ -38,7 +48,7 @@ def donwload_imgs(model, type_img: str):
         path_img = os.path.join(DIRS[type_img], filename)
         if os.path.exists(path_img):
             print(f"🔁 Already exists ({type_img}): {filename}")
-            continue
+            os.remove(path_img)
         download_img(url, path_img)
         sleep(0.2)
 
