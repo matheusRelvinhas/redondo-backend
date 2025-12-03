@@ -31,7 +31,8 @@ oauth.register(
 app.oauth = oauth
 
 db.init_app(app)
-CORS(app, origins=[os.getenv('FRONTEND_URL')], supports_credentials=True)
+#CORS(app, origins=[os.getenv('FRONTEND_URL')], supports_credentials=True)
+CORS(app, origins="*", supports_credentials=True)
 register_blueprints(app)
 
 with app.app_context():
@@ -47,6 +48,7 @@ if __name__ == '__main__':
     app.run(
         debug=os.getenv('FLASK_DEBUG') == 'True',
         port=int(os.getenv('FLASK_RUN_PORT')),
+        #host="0.0.0.0",
         threaded=True,
         use_reloader=False
     )

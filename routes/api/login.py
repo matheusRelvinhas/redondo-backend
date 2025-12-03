@@ -28,8 +28,14 @@ def generate_jwt_token(user_id):
     encode = jwt.encode(payload, os.getenv('JWT_SECRET_KEY'), algorithm='HS256')
     return encode
 
+def get_bearer_token():
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return None
+    return auth.split("Bearer ")[1]
+
 bp = Blueprint('login', __name__, url_prefix='/api/login')
-@bp.route('/', methods=["GET"])
+@bp.route('', methods=["GET"])
 def login():
     email = request.args.get('email')
     password = request.args.get('pwd')
@@ -91,13 +97,17 @@ def google_callback():
 
 @bp.route('/logout', methods=["GET"])
 def logout():
-    token = request.args.get('token')
+    token = get_bearer_token()
+    if not token:
+        return responseApi({"error": "missing_token"}, 400)
     get_access_and_user(token)
     return responseApi({"message": "logout_success"}, 200)
 
 @bp.route('/check_auth', methods=["GET"])
 def check_auth():
-    token = request.args.get('token')
+    token = get_bearer_token()
+    if not token:
+        return responseApi({"error": "missing_token"}, 400)
     user = get_access_and_user(token)
     if isinstance(user, User):
         return responseApi(

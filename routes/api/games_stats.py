@@ -6,7 +6,7 @@ import pytz
 
 bp = Blueprint('games_stats', __name__, url_prefix='/api/games_stats')
 
-@bp.route('/', methods=["GET"])
+@bp.route('', methods=["GET"])
 def games_stats():
     period = request.args.get('period')
     league = request.args.get('league')

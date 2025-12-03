@@ -5,7 +5,7 @@ import requests
 
 bp = Blueprint('player_stats', __name__, url_prefix='/api/player_stats')
 
-@bp.route('/', methods=["GET"])
+@bp.route('', methods=["GET"])
 def player_stats():
     period = request.args.get('period')
     game_count = request.args.get('game_count')

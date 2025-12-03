@@ -118,7 +118,7 @@ def get_team_leagues_info(slug):
     ).all()
     return [l.to_dict() for l in leagues_query]
 
-@bp.route('/', methods=["GET"])
+@bp.route('', methods=["GET"])
 def get_teams():
     region_code = request.args.get('region_code')
     cache_key = f"stats_teams::{region_code or 'all'}"

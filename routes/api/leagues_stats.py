@@ -8,7 +8,7 @@ bp = Blueprint('leagues_stats', __name__, url_prefix='/api/leagues_stats')
 
 import json
 
-@bp.route('/', methods=["GET"])
+@bp.route('', methods=["GET"])
 def get_leagues():
     status = request.args.get('status')
     years_param = request.args.get('years')
