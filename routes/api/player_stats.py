@@ -28,6 +28,35 @@ def player_stats():
     current_app.cache.set(cache_key, result, timeout=600)
     return responseApi(result, 200)
 
+@bp.route('/player', methods=["GET"])
+def player():
+    slug = request.args.get('slug')
+    if not slug:
+        return responseApi({"error": "missing_slug"}, 400)
+    cache_key = f"player_info::{slug}"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        return responseApi(cached, 200)
+    model_map = {
+        'last_month': PlayerStatsLastMonth,
+        '3_months': PlayerStats3Months,
+        '6_months': PlayerStats6Months,
+        '12_months': PlayerStats12Months
+    }
+    result = {
+        "slug": slug,
+        "periods": {}
+    }
+    for period_key, model in model_map.items():
+        player = model.query.filter_by(slug=slug).first()
+        if player:
+            result["periods"][period_key] = player.to_dict()
+    if not result["periods"]:
+        return responseApi({"error": "player_not_found"}, 404)
+    current_app.cache.set(cache_key, result, timeout=600)
+    return responseApi(result, 200)
+    
+
 @bp.route('/player_image', methods=["GET"])
 def player_image():
     slug = request.args.get('slug')
