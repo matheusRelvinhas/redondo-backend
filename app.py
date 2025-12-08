@@ -16,8 +16,9 @@ app.config['GOOGLE_CLIENT_ID'] = os.getenv('GOOGLE_CLIENT_ID')
 app.config['GOOGLE_CLIENT_SECRET'] = os.getenv('GOOGLE_CLIENT_SECRET')
 app.secret_key = os.getenv('GOOGLE_CLIENT_SECRET')
 
-app.config['CACHE_TYPE'] = 'SimpleCache'
-app.config['CACHE_DEFAULT_TIMEOUT'] = 300        
+app.config['CACHE_TYPE'] = 'FileSystemCache'
+app.config['CACHE_DIR'] = 'cache'
+app.config['CACHE_DEFAULT_TIMEOUT'] = 60 * 20      
 cache = Cache(app)
 
 oauth = OAuth(app)
@@ -47,6 +48,7 @@ app.cache = cache
 if __name__ == '__main__':
     app.run(
         debug=os.getenv('FLASK_DEBUG') == 'True',
+        host="localhost",
         port=int(os.getenv('FLASK_RUN_PORT')),
         #host="0.0.0.0",
         threaded=True,

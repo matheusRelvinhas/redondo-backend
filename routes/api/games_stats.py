@@ -12,7 +12,7 @@ def games_stats():
     league = request.args.get('league')
     if not period and not league:
         return responseApi({"error": "missing_arguments"}, 400)
-    cache_key = f"games_player::{period or league}"
+    cache_key = f"games_stats::{period or league}"
     cached = current_app.cache.get(cache_key)
     if cached:
         return responseApi(cached, 200)
@@ -51,30 +51,35 @@ def games_stats():
             ).all()
             filtered_games = [game.to_dict() for game in games]
     result = {"games": filtered_games}
-    current_app.cache.set(cache_key, result, timeout=60 * 15)
+    current_app.cache.set(cache_key, result, timeout=60*10)
     return responseApi(result, 200)
 
 @bp.route('/current', methods=["GET"])
 def games_current():
     games = GamesInfo.query.filter_by(status='current').all()
     games_list = [game.to_dict() for game in games]
+    cache_key = f"games_stats::current"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        return responseApi(cached, 200)
+    current_app.cache.set(cache_key, {"games": games_list}, timeout=2*10)
     return responseApi({"games": games_list}, 200)
 
 @bp.route('/upcoming', methods=["GET"])
 def games_upcoming():
-    cache_key = "games_player::upcoming"
+    cache_key = "games_stats::upcoming"
     cached = current_app.cache.get(cache_key)
     if cached:
         return responseApi(cached, 200)
     games = GamesInfo.query.filter_by(status='upcoming').all()
     games_list = [game.to_dict() for game in games]
     result = {"games": games_list}
-    current_app.cache.set(cache_key, result, timeout=60 * 10)
+    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
 
 @bp.route('/periods', methods=["GET"])
 def games_periods():
-    cache_key = "games_periods"
+    cache_key = "games_periods::"
     cached = current_app.cache.get(cache_key)
     if cached:
         return responseApi(cached, 200)
@@ -90,12 +95,12 @@ def games_periods():
         except ValueError:
             continue
     periods = sorted(periods_set, reverse=True)
-    current_app.cache.set(cache_key, periods, timeout=60 * 15)
+    current_app.cache.set(cache_key, periods, timeout=60*10)
     return responseApi(periods, 200)
 
 @bp.route("/leagues", methods=["GET"])
 def games_leagues():
-    cache_key = "games_leagues"
+    cache_key = "games_leagues::"
     cached = current_app.cache.get(cache_key)
     if cached:
         return responseApi(cached, 200)
@@ -107,17 +112,17 @@ def games_leagues():
     )
     leagues = (
         db.session.query(LeaguesInfo.slug, LeaguesInfo.name, LeaguesInfo.start_timestamp)
-        .filter(LeaguesInfo.league_id.in_(subq))
+        .filter(LeaguesInfo.league_id.in_(db.session.query(subq.c.league_id)))
         .order_by(LeaguesInfo.name.asc())  
         .all()
     )
     result = [{"slug": slug, "name": name, "start_timestamp": start_timestamp} for slug, name, start_timestamp in leagues]
-    current_app.cache.set(cache_key, result, timeout=600)
+    current_app.cache.set(cache_key, result, timeout=60*10)
     return responseApi(result, 200)
 
 @bp.route("/teams", methods=["GET"])
 def games_teams():
-    cache_key = "games_teams"
+    cache_key = "games_teams::"
     cached = current_app.cache.get(cache_key)
     if cached:
         return responseApi(cached, 200)
@@ -136,5 +141,5 @@ def games_teams():
         .all()
     )
     result = [{"slug": slug, "name": name} for slug, name in teams]
-    current_app.cache.set(cache_key, result, timeout=60 * 15)
+    current_app.cache.set(cache_key, result, timeout=60*10)
     return responseApi(result, 200)

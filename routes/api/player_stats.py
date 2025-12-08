@@ -25,7 +25,7 @@ def player_stats():
         return responseApi({"error": "invalid_period"}, 400)
     players = model.query.filter(model.games_count >= game_count).all()
     result = {"players": [p.to_dict() for p in players]}
-    current_app.cache.set(cache_key, result, timeout=600)
+    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
 
 @bp.route('/player', methods=["GET"])
@@ -38,22 +38,58 @@ def player():
     if cached:
         return responseApi(cached, 200)
     model_map = {
-        'last_month': PlayerStatsLastMonth,
-        '3_months': PlayerStats3Months,
-        '6_months': PlayerStats6Months,
-        '12_months': PlayerStats12Months
+        '1': PlayerStatsLastMonth,
+        '3': PlayerStats3Months,
+        '6': PlayerStats6Months,
+        '12': PlayerStats12Months
     }
-    result = {
-        "slug": slug,
-        "periods": {}
-    }
+    stats_list = []
+    (
+        nickname, first_name, last_name, 
+        team_name, team_slug, img_extension, 
+        country_code, team_img_extension, team_rank,
+        team_points
+    ) = None, None, None, None, None, None, None, None, None, None
     for period_key, model in model_map.items():
         player = model.query.filter_by(slug=slug).first()
         if player:
-            result["periods"][period_key] = player.to_dict()
-    if not result["periods"]:
+            player_data = player.to_dict()
+            if (
+                not nickname or not first_name or not last_name 
+                or not team_name or not team_slug or not img_extension 
+                or not country_code or not team_img_extension or not team_rank
+                or not team_points
+            ):
+                (
+                    nickname, first_name, last_name, 
+                    team_name, team_slug, img_extension, 
+                    country_code, team_img_extension, team_rank,
+                    team_points
+                ) = (
+                    player_data['nickname'], player_data['first_name'], player_data['last_name'], 
+                    player_data['team_name'], player_data['team_slug'], player_data['img_extension'], 
+                    player_data['country_code'], player_data['team_img_extension'], player_data['team_rank'],
+                    player_data['team_points']
+                )
+            player_data['period'] = period_key 
+            stats_list.append(player_data)
+    if not stats_list:
         return responseApi({"error": "player_not_found"}, 404)
-    current_app.cache.set(cache_key, result, timeout=600)
+    result = {
+        "slug": slug, 
+        "nickname": nickname,
+        "first_name": first_name,
+        "last_name": last_name,
+        "team_slug": team_slug,
+        "team_name": team_name,
+        "img_extension": img_extension,
+        "country_code": country_code,
+        "team_img_extension": team_img_extension,
+        "team_rank": team_rank,
+        "team_points": team_points,
+        "stats": stats_list 
+    }
+    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
     
 

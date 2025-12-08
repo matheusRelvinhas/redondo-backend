@@ -146,7 +146,7 @@ def get_teams():
         query = query.filter(TeamsInfo.region_code == region_code)
     teams = query.all()
     result = {"teams": [team.to_dict() for team in teams]}
-    current_app.cache.set(cache_key, result, timeout=600)
+    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
 
 @bp.route('/team', methods=["GET"])
@@ -166,11 +166,10 @@ def team_info():
         "team": team.to_dict(),
         "players": players_data,
         "games": games_info["games"],
-        "wl_games": games_info["wl_info"],
         "maps": get_team_maps_info(games_info["games"]),
         "leagues": leagues_list
     }
-    current_app.cache.set(cache_key, result, timeout=600)
+    current_app.cache.set(cache_key, result, timeout=60 *20)
     return responseApi(result, 200)
 
 @bp.route('/team_image', methods=["GET"])

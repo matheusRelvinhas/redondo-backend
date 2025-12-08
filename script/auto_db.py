@@ -4,11 +4,12 @@ import requests
 import time
 import traceback
 import math
+import threading
 from datetime import datetime, timedelta, timezone
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models import db, GamesInfo, TeamsInfo, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo
 from app import app
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 
 API_FINISHED_GAME_PART = "https://api.bo3.gg/api/v2/matches/finished?utc_offset=-10800&filter[tier][in]=s,a&filter[discipline_id][eq]=1&date="
 API_UPCOMING_GAME_PART = "https://api.bo3.gg/api/v2/matches/upcoming?utc_offset=-10800&filter[tier][in]=s,a&filter[discipline_id][eq]=1&date="
@@ -20,6 +21,8 @@ API_TEAM_PART = "https://api.bo3.gg/api/v1/teams/earnings?filter[teams.disciplin
 API_PLAYER_INFO_PART = "https://api.bo3.gg/api/v1/players/tops?sort=-avg_player_rating&filter[tournament_tier_rank][in]=1,2&filter[games_count][gte]=1"
 API_FINISHED_LEAGUE_INFO_PART = "https://api.bo3.gg/api/v1/tournaments?scope=index-finished-tournaments&sort=-end_date&filter[tournaments.status][in]=finished&filter[tournaments.tier][in]=s,a&filter[tournaments.discipline_id][eq]=1&with=teams,tournament_prizes"
 API_CURRENT_UPCOMING_LEAGUE_INFO_PART ="https://api.bo3.gg/api/v1/tournaments?scope=index-current-tournaments&sort=start_date&filter[tournaments.status][in]=current,upcoming&filter[tournaments.tier][in]=s,a&filter[tournaments.discipline_id][eq]=1&with=teams"
+API_GAME_TEAM_ROUNDS_PART = "https://api.bo3.gg/api/v1/games?sort=number&filter[games.match_id][eq]="
+
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -72,7 +75,7 @@ def iso_to_timestamp(iso_str: str) -> int:
     dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
     return int(dt.timestamp())
 
-def addOrAttGamesInfo(g):
+def addOrAttGamesInfo(g, is_live):
     game = GamesInfo.query.filter_by(game_id=safe_get(g, "id")).first()
     game_data = {
         "game_id": safe_get(g, "id"),
@@ -93,6 +96,8 @@ def addOrAttGamesInfo(g):
         "league_id": safe_get(g, "tournament"),
         "games": safe_get(g, "games"),
     }
+    if is_live:
+        print(safe_get(g, "live_updates"))
     if not game:
         game = GamesInfo(**game_data)
         db.session.add(game)
@@ -112,16 +117,18 @@ def get_url_att_game(url, date_str, is_live=False):
             for game in games:
                 if not (safe_get(game, 'team1_id') and safe_get(game, 'team2_id')):
                     continue
-                addOrAttGamesInfo(game)
+                addOrAttGamesInfo(game, is_live)
+                #######
+
         else: print(f"Don't have game_info at {date_str}")
     except requests.RequestException as e:
         print(f"Error accessing {url}: {e}")
 
-def games_finished_info():
+def games_finished_info(last_days):
     start_day = datetime.strptime(get_oldest_date(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
     today = datetime.now(timezone.utc)
-    if (today - start_day).days < 7:
-        start_day = today - timedelta(days=7)
+    if (today - start_day).days < last_days:
+        start_day = today - timedelta(days=last_days)
     current_day = start_day
     while current_day <= today:
         date_str = current_day.strftime("%Y-%m-%d")
@@ -498,7 +505,7 @@ def shortPlayerStatsData(shortPlayersStats):
             "team_slug": safe_get(p, "team", "slug"),
             "steam_game_ids": safe_get(p, "game_ids"),
             "kills": safe_get(p, "kills_sum"),
-            "death": safe_get(p, "death_sum"),
+            "deaths": safe_get(p, "deaths_sum"),
             "assists": safe_get(p, "assists_sum")
         }
         short_players_stats.append(playerData)
@@ -556,48 +563,144 @@ def games_players_stats():
                     maps_p.append(map_obj)
                 game.maps_players_stats = maps_p
                 db.session.commit()
-            else:
-                if (not game.short_players_stats or not game.short_maps_players_stats) and game.status=='finished' :
-                    url_maps = f"{API_GAME_STATS_PART}{game.slug}/games/"
-                    url_short = f"{API_GAME_STATS_PART}{game.slug}/short_players_stats/"
-                    response = requests.get(url_short, timeout=60)
-                    response.raise_for_status()
-                    short_maps_stats = safe_get(response.json())
-                    game.short_players_stats = shortPlayerStatsData(short_maps_stats)
-                    maps = game.games if game.games != 'null' else None
-                    if maps:
-                        p_maps = []
-                        s_maps = []
-                        for map in maps:
-                            map_name = safe_get(map, 'map_name')
-                            if not map_name: # Verifica se map_name é None ou uma string vazia
-                                continue
-                            response_m = requests.get(url_maps + map_name, timeout=60)
-                            response_m.raise_for_status()
-                            map_stats = safe_get(response_m.json())
-                            p_map = {
-                                "map_name": map_name,
-                                "steam_game_id": safe_get(map_stats, 'id'),
-                                "order": safe_get(map, "number")
-                            }
-                            print(p_map)
-                            p_maps.append(p_map)
-                            short_map_url = f"{API_MAP_GAME_STATS_PART}{safe_get(map_stats, 'id')}/short_players_stats"
-                            response_sm = requests.get(short_map_url, timeout=60)
-                            response_sm.raise_for_status()
-                            short_maps_players_stats = safe_get(response_sm.json())
-                            short_maps_players_stats = shortPlayerStatsData(short_maps_players_stats)
-                            short_map = {
-                                "map_name": map_name,
-                                "order": safe_get(map, "number"),
-                                "data": short_maps_players_stats
-                            }
-                            s_maps.append(short_map)
-                        game.maps = p_maps
-                        game.short_maps_players_stats = s_maps
-                        db.session.commit()
         except requests.RequestException as e:
             print(f"Error accessing {url}: {e}")
+
+def games_players_short_stats():
+    games = db.session.query(GamesInfo).filter(
+        or_(
+            GamesInfo.maps == None, GamesInfo.short_maps_players_stats == None, 
+            GamesInfo.short_players_stats == None, GamesInfo.players_stats == None,
+            GamesInfo.maps_players_stats == None
+        ),
+        GamesInfo.status == 'finished'
+    )
+    for game in games:
+        try:
+            url_short = f"{API_GAME_STATS_PART}{game.slug}/short_players_stats/"
+            print(f"Accessing: {url_short}")
+            response = requests.get(url_short, timeout=60)
+            response.raise_for_status()
+            short_maps_stats = safe_get(response.json())
+            game.short_players_stats = shortPlayerStatsData(short_maps_stats)
+            maps = game.games if game.games != 'null' else None
+            if maps:
+                p_maps = []
+                s_maps = []
+                for map in maps:
+                    map_name = safe_get(map, 'map_name')
+                    if not map_name:
+                        continue
+                    try: 
+                        url_maps = f"{API_GAME_STATS_PART}{game.slug}/games/"
+                        print(f"Accessing: {url_maps}")
+                        response_m = requests.get(url_maps + map_name, timeout=60)
+                        response_m.raise_for_status()
+                        map_stats = safe_get(response_m.json())
+                    except requests.RequestException as e:
+                        print(f"Error accessing {url_maps}: {e}")
+                    p_map = {
+                        "map_name": map_name,
+                        "steam_game_id": safe_get(map_stats, 'id'),
+                        "order": safe_get(map, "number")
+                    }
+                    p_maps.append(p_map)
+                    short_map_url = f"{API_MAP_GAME_STATS_PART}{safe_get(map_stats, 'id')}/short_players_stats"
+                    response_sm = requests.get(short_map_url, timeout=60)
+                    response_sm.raise_for_status()
+                    short_maps_players_stats = safe_get(response_sm.json())
+                    short_maps_players_stats = shortPlayerStatsData(short_maps_players_stats)
+                    short_map = {
+                        "map_name": map_name,
+                        "order": safe_get(map, "number"),
+                        "data": short_maps_players_stats
+                    }
+                    s_maps.append(short_map)
+                game.maps = p_maps
+                game.short_maps_players_stats = s_maps
+                db.session.commit()
+        except requests.RequestException as e:
+            print(f"Error accessing {url_short}: {e}")
+
+def mapsGameSideStatsData(mapsGameSideStats):
+    maps_game_side_stats = []
+    for m in mapsGameSideStats:
+        raw_side_results = safe_get(m, "game_side_results") or []
+        game_side_results = [
+            {
+                "order": safe_get(s, "order"),
+                "overtime": safe_get(s, "overtime"),
+                "winner_clan_side": safe_get(s, "winner_clan_side"),
+                "winner_clan_score": safe_get(s, "winner_clan_score"),
+                "loser_clan_side": safe_get(s, "loser_clan_side"),
+                "loser_clan_score": safe_get(s, "loser_clan_score"),
+                "winner_clan_name": safe_get(s, "winner_clan_name"),
+                "loser_clan_name": safe_get(s, "loser_clan_name"),
+            }
+            for s in raw_side_results
+        ]
+        raw_rounds = safe_get(m, "game_rounds") or []
+        game_rounds = []
+        for r in raw_rounds:
+            raw_team_clans = safe_get(r, "game_round_team_clans") or []
+            team_clans = [
+                {
+                    key: value
+                    for key, value in tc.items()
+                    if key not in ["id", "ov_index", "game_id", "game_round_id", "team_rating"]
+                }
+                for tc in raw_team_clans
+            ]
+            filtered_round = {
+                key: value
+                for key, value in r.items()
+                if key not in [
+                    "id",
+                    "game_id",
+                    "round_duration",
+                    "mvp_reason",
+                    "ov_index",
+                    "steam_profile_mvp_id",
+                    "round_map_data",
+                    "created_at",
+                    "updated_at",
+                ]
+            }
+            filtered_round["game_round_team_clans"] = team_clans
+            game_rounds.append(filtered_round)
+        gameSideData = {
+            "map_name": safe_get(m, "map_name"),
+            "order": safe_get(m, "number"),
+            "status": safe_get(m, "status"),
+            "rounds_count": safe_get(m, "rounds_count"),
+            "winner_score": safe_get(m, "winner_clan_score"),
+            "loser_score": safe_get(m, "loser_clan_score"),
+            "winner_slug": safe_get(m, "winner_team_clan", "team", "slug"),
+            "loser_slug": safe_get(m, "loser_team_clan", "team", "slug"),
+            "game_side": game_side_results,
+            "game_rounds": game_rounds,
+        }
+        maps_game_side_stats.append(gameSideData)
+    return maps_game_side_stats
+
+
+def games_map_side_stats():
+    games = db.session.query(GamesInfo).filter(
+        or_(GamesInfo.game_side_stats == None),
+        GamesInfo.status == 'finished'
+    )
+    for game in games:
+        try:
+            url_maps = f"{API_GAME_TEAM_ROUNDS_PART}{game.game_id}&with=winner_team_clan,loser_team_clan,game_side_results,game_rounds"
+            print(f"Accessing: {url_maps}")
+            response = requests.get(url_maps, timeout=60)
+            response.raise_for_status()
+            maps_game_side_stats = safe_get(response.json())
+            if safe_get(maps_game_side_stats, 'results') and len(safe_get(maps_game_side_stats, 'results')):
+                game.game_side_stats = mapsGameSideStatsData(safe_get(maps_game_side_stats, 'results'))
+                db.session.commit()
+        except requests.RequestException as e:
+            print(f"Error accessing {url_maps}: {e}")
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -625,36 +728,96 @@ FUNCTIONS = [
     ("games_upcoming_info", games_upcoming_info),
     ("games_stage_round", games_stage_round),
     ("games_players_stats", games_players_stats),
-    ("games_live_info", lambda: games_live_info(20)),
+    ("games_maps_players_short_stats", games_players_short_stats),
+    ("games_map_side_stats", games_map_side_stats),
+]
+
+FUNCTIONS_LIVE = [
+    ("games_finished_info", lambda: games_finished_info(2)),
+    ("games_maps_players_short_stats", games_players_short_stats),
+    ("games_live_info", lambda: games_live_info(2)),
 ]
 
 def run_auto_db_loop():
-    active_functions = FUNCTIONS.copy()
-    while True:
-        failed_functions = []
-        success_count = 0
-        for name, func in active_functions:
-            try:
-                func()
-                success_count += 1
-            except Exception as e:
-                tb = traceback.format_exc()
-                error_msg = (
-                    f"⚠️ Erro na função '{name}':\n"
-                    f"{str(e)}\n\n"
-                    f"📌 Traceback completo:\n{tb}"
-                )
-                print(error_msg) 
-                send_telegram(error_msg)
-                failed_functions.append(name)
-        active_functions = [f for f in active_functions if f[0] not in failed_functions]
-        summary = (
-            f"✅ Ciclo finalizado.\n"
-            f"✔️ Funções OK: {success_count}\n"
-            f"❌ Funções removidas: {len(failed_functions)}: {failed_functions}\n"
-        )
-        send_telegram(summary)
-        time.sleep(5)
+    with app.app_context():
+        active_functions = FUNCTIONS.copy()
+        while True:
+            failed_functions = []
+            success_count = 0
+            for name, func in active_functions:
+                try:
+                    func()
+                    success_count += 1
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    error_msg = (
+                        f"⚠️ Erro na função '{name}':\n"
+                        f"{str(e)}\n\n"
+                        f"📌 Traceback completo:\n{tb}"
+                    )
+                    print(error_msg)
+                    send_telegram(error_msg)
+                    failed_functions.append(name)
+            active_functions = [
+                f for f in active_functions if f[0] not in failed_functions
+            ]
+            summary = (
+                f"🔄 Loop completo finalizado.\n"
+                f"✔️ OK: {success_count}\n"
+                f"❌ Removidas: {failed_functions}"
+            )
+            send_telegram(summary)
+            time.sleep(30*60)
 
-with app.app_context():
-    run_auto_db_loop()
+def run_auto_live_loop():
+    with app.app_context():
+        active_functions = FUNCTIONS_LIVE.copy()
+        while True:
+            failed_functions = []
+            success_count = 0
+            for name, func in active_functions:
+                now_timestamp = int(time.time())
+                games = (
+                    db.session.query(GamesInfo)
+                    .filter(or_(and_(
+                            GamesInfo.status == 'upcoming',
+                            GamesInfo.start_timestamp < now_timestamp
+                        ),
+                        GamesInfo.status == 'current'
+                    )).all()
+                )
+                if games:
+                    try:
+                        func()
+                        success_count += 1
+                    except Exception as e:
+                        tb = traceback.format_exc()
+                        error_msg = (
+                            f"⚠️ Erro na função AO VIVO '{name}':\n"
+                            f"{str(e)}\n\n"
+                            f"📌 Traceback completo:\n{tb}"
+                        )
+                        print(error_msg)
+                        send_telegram(error_msg)
+                        failed_functions.append(name)
+
+            active_functions = [
+                f for f in active_functions if f[0] not in failed_functions
+            ]
+            summary = (
+                f"🔥 Loop AO VIVO finalizado.\n"
+                f"✔️ OK: {success_count}\n"
+                f"❌ Removidas: {failed_functions}"
+            )
+            send_telegram(summary)
+            time.sleep(5)
+
+
+t1 = threading.Thread(target=run_auto_db_loop, daemon=True)
+t2 = threading.Thread(target=run_auto_live_loop, daemon=True)
+
+t1.start()
+t2.start()
+
+t1.join()
+t2.join()

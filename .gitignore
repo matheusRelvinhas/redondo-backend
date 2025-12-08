@@ -16,6 +16,8 @@ pip-log.txt
 instance/
 migrations/
 
+cache/
+
 # Ignorar configurações do VS Code e IDEs
 .vscode/
 .idea/

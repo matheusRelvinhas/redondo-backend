@@ -1,6 +1,7 @@
 import pytz
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import deferred
 from flask_login import UserMixin
 
 db = SQLAlchemy()
@@ -170,16 +171,24 @@ class PlayerStatsBase(db.Model):
             data["img_extension"] = None
         team_slug = None
         team_name = None
+        team_rank = None
         team_points = None
+        team_img_extension = None
         if self.team_id:
             team = TeamsInfo.query.filter_by(team_id=self.team_id).first()
             if team:
                 team_slug = team.slug
                 team_name = team.team_name
+                team_rank = team.rank
                 team_points = team.points
+                if team.image_url and '.' in team.image_url:
+                    team_img_extension = team.image_url.rsplit('.', 1)[-1].lower()
+
         data["team_slug"] = team_slug
         data["team_name"] = team_name
+        data["team_rank"] = team_rank
         data["team_points"] = team_points
+        data["team_img_extension"] = team_img_extension
         return data
     
     
@@ -283,17 +292,23 @@ class GamesInfo(db.Model):
     games = db.Column(db.JSON, nullable=True)
     games_score = db.Column(db.JSON, nullable=True)
     stage_round = db.Column(db.JSON, nullable=True)
-    players_stats = db.Column(db.JSON, nullable=True)
     maps = db.Column(db.JSON, nullable=True)
-    maps_players_stats = db.Column(db.JSON, nullable=True)
-    short_players_stats = db.Column(db.JSON, nullable=True)
-    short_maps_players_stats = db.Column(db.JSON, nullable=True)
+    players_stats = deferred(db.Column(db.JSON, nullable=True))
+    maps_players_stats = deferred(db.Column(db.JSON, nullable=True))
+    short_players_stats = deferred(db.Column(db.JSON, nullable=True))
+    short_maps_players_stats = deferred(db.Column(db.JSON, nullable=True))
+    game_side_stats = deferred(db.Column(db.JSON, nullable=True))
+    live_stats = deferred(db.Column(db.JSON, nullable=True))
 
     created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
 
     def to_dict(self):
-        exclude_fields = {"game_id", "league_id", "team1_id", "team2_id", "winner_team_id", "games", "players_stats", "maps_players_stats"}
+        exclude_fields = {
+            "game_id", "league_id", "team1_id", "team2_id", "winner_team_id", "games", "players_stats", 
+            "maps", "maps_players_stats", "short_players_stats", "short_maps_players_stats", 
+            "game_side_stats", "live_stats"
+        }
         data = {
             c.name: getattr(self, c.name)
             for c in self.__table__.columns

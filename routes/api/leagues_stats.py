@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from flask import Blueprint, request, Response, current_app
-from models import LeaguesInfo
+from models import LeaguesInfo, GamesInfo, db
 from utils import responseApi
 import requests
 
@@ -41,7 +41,77 @@ def get_leagues():
                 continue
     leagues = filtered_leagues
     result = {"leagues": [league.to_dict() for league in leagues]}
-    current_app.cache.set(cache_key, result, timeout=600)
+    current_app.cache.set(cache_key, result, timeout=20*60)
+    return responseApi(result, 200)
+
+@bp.route('/league', methods=["GET"])
+def league():
+    slug = request.args.get('slug')
+    if not slug:
+        return responseApi({"error": "missing_slug"}, 400)
+    cache_key = f"league_info::{slug}"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        return responseApi(cached, 200)
+    league = LeaguesInfo.query.filter_by(slug=slug).first()
+    if not league:
+        return responseApi({"error": "league_not_found"}, 404)
+    current_app.cache.set(cache_key, league.to_dict(), timeout=20*60)
+    return responseApi(league.to_dict(), 200)
+
+@bp.route('/current', methods=["GET"])
+def league_games_current():
+    slug = request.args.get('slug')
+    if not slug:
+        return responseApi({"error": "missing_slug"}, 400)
+    league = LeaguesInfo.query.filter_by(slug=slug).first()
+    if not league:
+        return responseApi({"error": "league_not_found"}, 404)
+    cache_key = f"league_games_current::{slug}"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        return responseApi(cached, 200)
+    games = db.session.query(GamesInfo.status, GamesInfo.league_id).filter_by(status='current', league_id=league.league_id).all()
+    is_current = False
+    if len(games) >= 1:
+        is_current = True
+    current_app.cache.set(cache_key, {"current": is_current}, timeout=2*60)
+    return responseApi({"current": is_current}, 200)
+
+@bp.route('/finished', methods=["GET"])
+def league_games_finished():
+    slug = request.args.get('slug')
+    if not slug:
+        return responseApi({"error": "missing_slug"}, 400)
+    cache_key = f"games_league::finished/{slug}"
+    cached = current_app.cache.get(cache_key)
+    league = LeaguesInfo.query.filter_by(slug=slug).first()
+    if not league:
+        return responseApi({"error": "league_not_found"}, 404)
+    if cached:
+        return responseApi(cached, 200)
+    games = GamesInfo.query.filter_by(status='finished', league_id=league.league_id).all()
+    games_list = [game.to_dict() for game in games]
+    result = {"games": games_list}
+    current_app.cache.set(cache_key, result, timeout=60*10)
+    return responseApi(result, 200)
+
+@bp.route('/upcoming', methods=["GET"])
+def league_games_upcoming():
+    slug = request.args.get('slug')
+    if not slug:
+        return responseApi({"error": "missing_slug"}, 400)
+    cache_key = f"games_league::upcoming/{slug}"
+    cached = current_app.cache.get(cache_key)
+    league = LeaguesInfo.query.filter_by(slug=slug).first()
+    if not league:
+        return responseApi({"error": "league_not_found"}, 404)
+    if cached:
+        return responseApi(cached, 200)
+    games = GamesInfo.query.filter_by(status='upcoming', league_id=league.league_id).all()
+    games_list = [game.to_dict() for game in games]
+    result = {"games": games_list}
+    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
 
 @bp.route('/league_image', methods=["GET"])
