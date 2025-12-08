@@ -124,7 +124,7 @@ def get_url_att_game(url, date_str, is_live=False):
     except requests.RequestException as e:
         print(f"Error accessing {url}: {e}")
 
-def games_finished_info(last_days):
+def games_finished_info(last_days=7):
     start_day = datetime.strptime(get_oldest_date(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
     today = datetime.now(timezone.utc)
     if (today - start_day).days < last_days:
@@ -570,8 +570,11 @@ def games_players_short_stats():
     games = db.session.query(GamesInfo).filter(
         or_(
             GamesInfo.maps == None, GamesInfo.short_maps_players_stats == None, 
-            GamesInfo.short_players_stats == None, GamesInfo.players_stats == None,
-            GamesInfo.maps_players_stats == None
+            GamesInfo.short_players_stats == None,
+        ),
+        or_(
+            GamesInfo.maps == None, GamesInfo.maps_players_stats == None,
+            GamesInfo.players_stats == None,
         ),
         GamesInfo.status == 'finished'
     )
@@ -800,16 +803,15 @@ def run_auto_live_loop():
                         print(error_msg)
                         send_telegram(error_msg)
                         failed_functions.append(name)
-
-            active_functions = [
-                f for f in active_functions if f[0] not in failed_functions
-            ]
-            summary = (
-                f"🔥 Loop AO VIVO finalizado.\n"
-                f"✔️ OK: {success_count}\n"
-                f"❌ Removidas: {failed_functions}"
-            )
-            send_telegram(summary)
+                    active_functions = [
+                        f for f in active_functions if f[0] not in failed_functions
+                    ]
+                    summary = (
+                        f"🔥 Loop AO VIVO finalizado.\n"
+                        f"✔️ OK: {success_count}\n"
+                        f"❌ Removidas: {failed_functions}"
+                    )
+                    send_telegram(summary)
             time.sleep(5)
 
 

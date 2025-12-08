@@ -103,8 +103,8 @@ def get_team_maps_info(games):
             map_info["team2_slug"] = game.get("team2_slug")
             map_info["team1_score"] = game.get("team1_score")
             map_info["team2_score"] = game.get("team2_score")
-            map_info["team1_img_extension"] = game.get("team1_img_extension")
-            map_info["team2_img_extension"] = game.get("team2_img_extension")
+            map_info["team1_img_url"] = game.get("team1_img_url")
+            map_info["team2_img_url"] = game.get("team2_img_url")
             maps_list.append(map_info)
     return maps_list
 

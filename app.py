@@ -18,7 +18,7 @@ app.secret_key = os.getenv('GOOGLE_CLIENT_SECRET')
 
 app.config['CACHE_TYPE'] = 'FileSystemCache'
 app.config['CACHE_DIR'] = 'cache'
-app.config['CACHE_DEFAULT_TIMEOUT'] = 60 * 20      
+app.config['CACHE_DEFAULT_TIMEOUT'] = 60 * 20
 cache = Cache(app)
 
 oauth = OAuth(app)

@@ -45,9 +45,9 @@ class TeamsInfo(db.Model):
             if c.name not in excluded_fields
         }
         if self.image_url and '.' in self.image_url:
-            result['img_extension'] = self.image_url.rsplit('.', 1)[-1].lower()
+            result['img_url'] = f"{self.slug}.{self.image_url.rsplit('.', 1)[-1].lower()}" 
         else:
-            result['img_extension'] = None
+            result['img_url'] = None
         return result
 
 class PlayerStatsBase(db.Model):
@@ -166,14 +166,14 @@ class PlayerStatsBase(db.Model):
             if c.name not in exclude_fields
         }
         if self.image_url and '.' in self.image_url:
-            data["img_extension"] = self.image_url.rsplit('.', 1)[-1].lower()
+            data['img_url'] = f"{self.slug}.{self.image_url.rsplit('.', 1)[-1].lower()}" 
         else:
-            data["img_extension"] = None
+            data['img_url'] = None
         team_slug = None
         team_name = None
         team_rank = None
         team_points = None
-        team_img_extension = None
+        team_img_url = None
         if self.team_id:
             team = TeamsInfo.query.filter_by(team_id=self.team_id).first()
             if team:
@@ -182,13 +182,13 @@ class PlayerStatsBase(db.Model):
                 team_rank = team.rank
                 team_points = team.points
                 if team.image_url and '.' in team.image_url:
-                    team_img_extension = team.image_url.rsplit('.', 1)[-1].lower()
+                    team_img_url = f"{team.slug}.{team.image_url.rsplit('.', 1)[-1].lower()}"
 
         data["team_slug"] = team_slug
         data["team_name"] = team_name
         data["team_rank"] = team_rank
         data["team_points"] = team_points
-        data["team_img_extension"] = team_img_extension
+        data["team_img_url"] = team_img_url
         return data
     
     
@@ -239,9 +239,9 @@ class LeaguesInfo(db.Model):
                         }
                         if 'image_url' in team and isinstance(team['image_url'], str):
                             ext = team['image_url'].rsplit('.', 1)[-1].lower()
-                            filtered_team['img_extension'] = ext
+                            filtered_team['img_url'] = f"{team["slug"]}.{ext}"
                         else:
-                            filtered_team['img_extension'] = None
+                            filtered_team['img_url'] = None
                         filtered_teams.append(filtered_team)
                 result['teams'] = filtered_teams
             elif column.name == 'tournament_prizes' and isinstance(value, list):
@@ -255,18 +255,18 @@ class LeaguesInfo(db.Model):
                             }
                             if 'image_url' in new_item["teams"] and isinstance(new_item["teams"]['image_url'], str):
                                 ext = new_item["teams"]['image_url'].rsplit('.', 1)[-1].lower()
-                                filtered_team['img_extension'] = ext
+                                filtered_team['img_url'] = f"{new_item["teams"]['slug']}.{ext}"
                             else:
-                                filtered_team['img_extension'] = None
+                                filtered_team['img_url'] = None
                             new_item["teams"] = filtered_team
                         cleaned_prizes.append(new_item)
                 result['tournament_prizes'] = cleaned_prizes
             else:
                 result[column.name] = value
         if self.image_url and '.' in self.image_url:
-            result['img_extension'] = self.image_url.rsplit('.', 1)[-1].lower()
+            result['img_url'] = f"{self.slug}.{self.image_url.rsplit('.', 1)[-1].lower()}"
         else:
-            result['img_extension'] = None
+            result['img_url'] = None
         return result
 
 class GamesInfo(db.Model):
@@ -316,45 +316,45 @@ class GamesInfo(db.Model):
         }
         league_name = None
         league_slug = None
-        league_img_extension = None
+        league_img_url = None
         if self.league_id:
             league = LeaguesInfo.query.filter_by(league_id=self.league_id).first()
             if league:
                 league_name = league.name
                 league_slug = league.slug
                 if league.image_url and "." in league.image_url:
-                    league_img_extension = league.image_url.rsplit(".", 1)[-1]
+                    league_img_url = f"{league.slug}.{league.image_url.rsplit(".", 1)[-1]}"
         data["league_name"] = league_name
         data["league_slug"] = league_slug
-        data["league_img_extension"] = league_img_extension
+        data["league_img_url"] = league_img_url
         team1_name = None
         team1_slug = None
-        team1_img_extension = None
+        team1_img_url = None
         team2_name = None
         team2_slug = None
-        team2_img_extension = None
+        team2_img_url = None
         winner_team_slug = None
         team1 = TeamsInfo.query.filter_by(team_id=self.team1_id).first()
         if team1:
             team1_name = team1.team_name
             team1_slug = team1.slug
             if team1.image_url and "." in team1.image_url:
-                team1_img_extension = team1.image_url.rsplit(".", 1)[-1]
+                team1_img_url = f"{team1.slug}.{team1.image_url.rsplit(".", 1)[-1]}"
         team2 = TeamsInfo.query.filter_by(team_id=self.team2_id).first()
         if team2:
             team2_name = team2.team_name
             team2_slug = team2.slug
             if team2.image_url and "." in team2.image_url:
-                team2_img_extension = team2.image_url.rsplit(".", 1)[-1]
+                team2_img_url = f"{team2.slug}.{team2.image_url.rsplit(".", 1)[-1]}"
         if self.winner_team_id:
             winner_team = TeamsInfo.query.filter_by(team_id=self.winner_team_id).first()
             if winner_team:
                 winner_team_slug = winner_team.slug
         data["team1_name"] = team1_name
         data["team1_slug"] = team1_slug
-        data["team1_img_extension"] = team1_img_extension
+        data["team1_img_url"] = team1_img_url
         data["team2_name"] = team2_name
         data["team2_slug"] = team2_slug
-        data["team2_img_extension"] = team2_img_extension
+        data["team2_img_url"] = team2_img_url
         data["winner_team_slug"] = winner_team_slug
         return data

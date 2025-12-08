@@ -46,8 +46,8 @@ def player():
     stats_list = []
     (
         nickname, first_name, last_name, 
-        team_name, team_slug, img_extension, 
-        country_code, team_img_extension, team_rank,
+        team_name, team_slug, img_url, 
+        country_code, team_img_url, team_rank,
         team_points
     ) = None, None, None, None, None, None, None, None, None, None
     for period_key, model in model_map.items():
@@ -56,19 +56,19 @@ def player():
             player_data = player.to_dict()
             if (
                 not nickname or not first_name or not last_name 
-                or not team_name or not team_slug or not img_extension 
-                or not country_code or not team_img_extension or not team_rank
+                or not team_name or not team_slug or not img_url
+                or not country_code or not team_img_url or not team_rank
                 or not team_points
             ):
                 (
                     nickname, first_name, last_name, 
-                    team_name, team_slug, img_extension, 
-                    country_code, team_img_extension, team_rank,
+                    team_name, team_slug, img_url, 
+                    country_code, team_img_url, team_rank,
                     team_points
                 ) = (
                     player_data['nickname'], player_data['first_name'], player_data['last_name'], 
-                    player_data['team_name'], player_data['team_slug'], player_data['img_extension'], 
-                    player_data['country_code'], player_data['team_img_extension'], player_data['team_rank'],
+                    player_data['team_name'], player_data['team_slug'], player_data['img_url'],
+                    player_data['country_code'], player_data['team_img_url'], player_data['team_rank'],
                     player_data['team_points']
                 )
             player_data['period'] = period_key 
@@ -82,9 +82,9 @@ def player():
         "last_name": last_name,
         "team_slug": team_slug,
         "team_name": team_name,
-        "img_extension": img_extension,
+        "img_url": img_url,
         "country_code": country_code,
-        "team_img_extension": team_img_extension,
+        "team_img_url": team_img_url,
         "team_rank": team_rank,
         "team_points": team_points,
         "stats": stats_list 
