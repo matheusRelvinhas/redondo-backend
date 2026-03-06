@@ -31,52 +31,65 @@ def player_stats():
 @bp.route('/player', methods=["GET"])
 def player():
     slug = request.args.get('slug')
+    period = request.args.get('period')
     if not slug:
         return responseApi({"error": "missing_slug"}, 400)
-    cache_key = f"player_info::{slug}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        return responseApi(cached, 200)
     model_map = {
         '1': PlayerStatsLastMonth,
         '3': PlayerStats3Months,
         '6': PlayerStats6Months,
         '12': PlayerStats12Months
     }
+
+    if period and period in model_map:
+        periods_to_query = {period: model_map[period]}
+        cache_suffix = period
+    else:
+        periods_to_query = model_map
+        cache_suffix = "all"
+
+    cache_key = f"player_info::{slug}::{cache_suffix}"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        return responseApi(cached, 200)
+
     stats_list = []
+
     (
         nickname, first_name, last_name, 
         team_name, team_slug, img_url, 
         country_code, team_img_url, team_rank,
         team_points
-    ) = None, None, None, None, None, None, None, None, None, None
-    for period_key, model in model_map.items():
+    ) = (None,) * 10
+
+    for period_key, model in periods_to_query.items():
         player = model.query.filter_by(slug=slug).first()
-        if player:
-            player_data = player.to_dict()
-            if (
-                not nickname or not first_name or not last_name 
-                or not team_name or not team_slug or not img_url
-                or not country_code or not team_img_url or not team_rank
-                or not team_points
-            ):
-                (
-                    nickname, first_name, last_name, 
-                    team_name, team_slug, img_url, 
-                    country_code, team_img_url, team_rank,
-                    team_points
-                ) = (
-                    player_data['nickname'], player_data['first_name'], player_data['last_name'], 
-                    player_data['team_name'], player_data['team_slug'], player_data['img_url'],
-                    player_data['country_code'], player_data['team_img_url'], player_data['team_rank'],
-                    player_data['team_points']
-                )
-            player_data['period'] = period_key 
-            stats_list.append(player_data)
+        if not player:
+            continue
+
+        player_data = player.to_dict()
+
+        if not nickname:
+            (
+                nickname, first_name, last_name, 
+                team_name, team_slug, img_url, 
+                country_code, team_img_url, team_rank,
+                team_points
+            ) = (
+                player_data['nickname'], player_data['first_name'], player_data['last_name'], 
+                player_data['team_name'], player_data['team_slug'], player_data['img_url'],
+                player_data['country_code'], player_data['team_img_url'], player_data['team_rank'],
+                player_data['team_points']
+            )
+
+        player_data['period'] = period_key
+        stats_list.append(player_data)
+
     if not stats_list:
         return responseApi({"error": "player_not_found"}, 404)
+
     result = {
-        "slug": slug, 
+        "slug": slug,
         "nickname": nickname,
         "first_name": first_name,
         "last_name": last_name,
@@ -87,8 +100,9 @@ def player():
         "team_img_url": team_img_url,
         "team_rank": team_rank,
         "team_points": team_points,
-        "stats": stats_list 
+        "stats": stats_list
     }
+
     current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
     

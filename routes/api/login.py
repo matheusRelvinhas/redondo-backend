@@ -131,7 +131,6 @@ def recover_password():
         return responseApi({"error": "invalid_email"}, 400)
     recover_token = generate_jwt_token(user.id)
     reset_link = f"{os.getenv('FRONTEND_URL')}/login?recover_token={recover_token}"
-    print(reset_link)
     try:
         #response = resend.Emails.send({
         #    "from": "onboarding@resend.dev",

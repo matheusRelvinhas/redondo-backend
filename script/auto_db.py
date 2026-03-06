@@ -75,6 +75,23 @@ def iso_to_timestamp(iso_str: str) -> int:
     dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
     return int(dt.timestamp())
 
+def delete_games():
+    two_days_ago = int(time.time()) - (2 * 24 * 60 * 60)
+    one_year_ago = int(time.time()) - (365 * 24 * 60 * 60)
+    recent_games = db.session.query(GamesInfo).filter(
+        GamesInfo.status == 'finished',
+        GamesInfo.parsed_status != 'done',
+        GamesInfo.start_timestamp >= two_days_ago
+    ).all()
+    old_games = db.session.query(GamesInfo).filter(
+        GamesInfo.start_timestamp < one_year_ago
+    ).all()
+    for game in recent_games:
+        db.session.delete(game)
+    for game in old_games:
+        db.session.delete(game)
+    db.session.commit()
+
 def addOrAttGamesInfo(g, is_live):
     game = GamesInfo.query.filter_by(game_id=safe_get(g, "id")).first()
     game_data = {
@@ -118,8 +135,7 @@ def get_url_att_game(url, date_str, is_live=False):
                 if not (safe_get(game, 'team1_id') and safe_get(game, 'team2_id')):
                     continue
                 addOrAttGamesInfo(game, is_live)
-                #######
-
+                #live
         else: print(f"Don't have game_info at {date_str}")
     except requests.RequestException as e:
         print(f"Error accessing {url}: {e}")
@@ -514,7 +530,8 @@ def shortPlayerStatsData(shortPlayersStats):
 def games_players_stats():
     games = db.session.query(GamesInfo).filter(
         or_(GamesInfo.players_stats == None, GamesInfo.maps == None, GamesInfo.maps_players_stats == None),
-        GamesInfo.status == 'finished'
+        GamesInfo.status == 'finished',
+        GamesInfo.parsed_status == 'done'
     )
     for game in games:
         url = f"{API_GAME_STATS_PART}{game.slug}/players_stats"
@@ -616,7 +633,7 @@ def games_players_short_stats():
                     short_map = {
                         "map_name": map_name,
                         "order": safe_get(map, "number"),
-                        "data": short_maps_players_stats
+                        "players_stats": short_maps_players_stats
                     }
                     s_maps.append(short_map)
                 game.maps = p_maps
@@ -628,6 +645,14 @@ def games_players_short_stats():
 def mapsGameSideStatsData(mapsGameSideStats):
     maps_game_side_stats = []
     for m in mapsGameSideStats:
+        team1_clan = {
+            "slug": safe_get(m, "winner_team_clan", "team", "slug"),
+            "name": safe_get(m, "winner_team_clan", "clan_name"),
+        }
+        team2_clan = {
+            "slug": safe_get(m, "loser_team_clan", "team", "slug"),
+            "name": safe_get(m, "loser_team_clan", "clan_name"),
+        }
         raw_side_results = safe_get(m, "game_side_results") or []
         game_side_results = [
             {
@@ -638,7 +663,9 @@ def mapsGameSideStatsData(mapsGameSideStats):
                 "loser_clan_side": safe_get(s, "loser_clan_side"),
                 "loser_clan_score": safe_get(s, "loser_clan_score"),
                 "winner_clan_name": safe_get(s, "winner_clan_name"),
+                "winner_clan_slug": team1_clan["slug"] if safe_get(s, "winner_clan_name") == team1_clan["name"] else team2_clan["slug"],
                 "loser_clan_name": safe_get(s, "loser_clan_name"),
+                "loser_clan_slug": team1_clan["slug"] if safe_get(s, "loser_clan_name") == team1_clan["name"] else team2_clan["slug"],
             }
             for s in raw_side_results
         ]
@@ -670,6 +697,8 @@ def mapsGameSideStatsData(mapsGameSideStats):
                 ]
             }
             filtered_round["game_round_team_clans"] = team_clans
+            filtered_round["winner_clan_slug"] = team1_clan["slug"] if safe_get(r, "winner_clan_name") == team1_clan["name"] else team2_clan["slug"]
+            filtered_round["loser_clan_slug"] = team1_clan["slug"] if safe_get(r, "loser_clan_name") == team1_clan["name"] else team2_clan["slug"]
             game_rounds.append(filtered_round)
         gameSideData = {
             "map_name": safe_get(m, "map_name"),
@@ -690,7 +719,8 @@ def mapsGameSideStatsData(mapsGameSideStats):
 def games_map_side_stats():
     games = db.session.query(GamesInfo).filter(
         or_(GamesInfo.game_side_stats == None),
-        GamesInfo.status == 'finished'
+        GamesInfo.status == 'finished',
+        GamesInfo.parsed_status == 'done'
     )
     for game in games:
         try:
@@ -727,6 +757,7 @@ FUNCTIONS = [
     ("player_info_period_92", lambda: player_info_period(92, 'last_3_months')),
     ("player_info_period_183", lambda: player_info_period(183, 'last_6_months')),
     ("player_info_period_365", lambda: player_info_period(365, 'last_12_months')),
+    ("delete_games", delete_games),
     ("games_finished_info", games_finished_info),
     ("games_upcoming_info", games_upcoming_info),
     ("games_stage_round", games_stage_round),

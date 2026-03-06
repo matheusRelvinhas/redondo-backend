@@ -94,17 +94,18 @@ def get_team_maps_info(games):
     for game in games:
         if not game.get("games_score"):
             continue
-        for map_score in game["games_score"]:
+        for map_score in game['games_score']:
             map_info = map_score.copy()
-            map_info["start_timestamp"] = (game.get("start_timestamp") or 0) + (game.get("order") or 0)
-            map_info["team1_name"] = game.get("team1_name")
-            map_info["team2_name"] = game.get("team2_name")
-            map_info["team1_slug"] = game.get("team1_slug")
-            map_info["team2_slug"] = game.get("team2_slug")
-            map_info["team1_score"] = game.get("team1_score")
-            map_info["team2_score"] = game.get("team2_score")
-            map_info["team1_img_url"] = game.get("team1_img_url")
-            map_info["team2_img_url"] = game.get("team2_img_url")
+            map_info['game_slug'] = game.get('slug')
+            map_info['start_timestamp'] = (game.get('start_timestamp') or 0) + (map_score.get('order') or 0)
+            map_info['team1_name'] = game.get('team1_name')
+            map_info['team2_name'] = game.get('team2_name')
+            map_info['team1_slug'] = game.get('team1_slug')
+            map_info['team2_slug'] = game.get('team2_slug')
+            map_info['team1_score'] = game.get('team1_score')
+            map_info['team2_score'] = game.get('team2_score')
+            map_info['team1_img_url'] = game.get('team1_img_url')
+            map_info['team2_img_url'] = game.get('team2_img_url')
             maps_list.append(map_info)
     return maps_list
 

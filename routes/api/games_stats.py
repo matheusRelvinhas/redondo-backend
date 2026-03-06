@@ -2,9 +2,19 @@ from flask import Blueprint, request, current_app
 from models import db, GamesInfo, LeaguesInfo, TeamsInfo
 from utils import responseApi
 from datetime import datetime, timedelta
+from sqlalchemy.orm import undefer, load_only
 import pytz
 
 bp = Blueprint('games_stats', __name__, url_prefix='/api/games_stats')
+
+def clean_game_side_stats(game_side_stats):
+    if not game_side_stats:
+        return game_side_stats
+    for game in game_side_stats:
+        if "game_rounds" in game:
+            for round_data in game["game_rounds"]:
+                round_data.pop("game_round_team_clans", None)
+    return game_side_stats
 
 @bp.route('', methods=["GET"])
 def games_stats():
@@ -30,8 +40,8 @@ def games_stats():
         ).all()
         filtered_games = [game.to_dict() for game in games]
     else:
-        if period == 'last_7':
-            seven_days_ago = now - timedelta(days=7)
+        if period == 'last_15':
+            seven_days_ago = now - timedelta(days=15)
             games = GamesInfo.query.filter_by(status='finished').all()
             filtered_games = []
             for game in games:
@@ -142,4 +152,60 @@ def games_teams():
     )
     result = [{"slug": slug, "name": name} for slug, name in teams]
     current_app.cache.set(cache_key, result, timeout=60*10)
+    return responseApi(result, 200)
+
+@bp.route("/game", methods=["GET"])
+def game():
+    game_slug = request.args.get('slug')
+    cache_key = f"game/{game_slug}::"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        return responseApi(cached, 200)
+    game = (
+        db.session.query(GamesInfo)
+        .filter(GamesInfo.slug == game_slug)
+        .first()
+    )
+    if not game:
+        return responseApi({"error": "Game not found"}, 404)
+    result = game.to_dict()
+    current_app.cache.set(cache_key, result, timeout=60 * 10)
+    return responseApi(result, 200)
+
+@bp.route("/game_info", methods=["GET"])
+def game_info():
+    game_slug = request.args.get('slug')
+    game_stat = request.args.get('game_stat')
+    if not game_slug or not game_stat:
+        return responseApi({"error": "missing_arguments"}, 400)
+    if game_stat not in [
+        "players_stats", "maps_players_stats", "short_players_stats", 
+        "short_maps_players_stats", "game_side_stats", "live_stats"
+    ]:
+        return responseApi({"error": "invalid_game_stat"}, 400)
+    cache_key = f"game_info/{game_slug}&{game_stat}::"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        return responseApi(cached, 200)
+    column = getattr(GamesInfo, game_stat)
+    game = (
+        db.session.query(GamesInfo)
+        .options(
+            load_only(GamesInfo.slug),
+            undefer(column),
+        )
+        .filter(GamesInfo.slug == game_slug)
+        .first()
+    )
+    
+    if not game:
+        return responseApi({"error": "Game not found"}, 404)
+    result = {}
+    data = getattr(game, game_stat)
+
+    if game_stat == "game_side_stats":
+        data = clean_game_side_stats(data)
+
+    result[f"{game_stat}"] = data
+    current_app.cache.set(cache_key, result, timeout=60 * 30)
     return responseApi(result, 200)
