@@ -1,13 +1,14 @@
 import re
 import jwt
 import os
-import resend
+import smtplib
 from flask import Blueprint, request, redirect, current_app
 from datetime import datetime, timedelta
 from email_validator import validate_email, EmailNotValidError
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User
 from utils import responseApi, get_access_and_user
+from email.mime.text import MIMEText
 
 def validate_email_function(email: str) -> bool:
     try:
@@ -34,6 +35,21 @@ def get_bearer_token():
         return None
     return auth.split("Bearer ")[1]
 
+def send_email_recovery(to_email, subject, html):
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 587
+    sender_email = os.getenv("GOOGLE_SEND_EMAIL")
+    sender_password = os.getenv("GOOGLE_SEND_PASSWORD")
+    msg = MIMEText(html, "html")
+    msg["Subject"] = subject
+    msg["From"] = sender_email
+    msg["To"] = to_email
+    server = smtplib.SMTP(smtp_server, smtp_port)
+    server.starttls()
+    server.login(sender_email, sender_password)
+    server.sendmail(sender_email, to_email, msg.as_string())
+    server.quit()
+
 bp = Blueprint('login', __name__, url_prefix='/api/login')
 @bp.route('', methods=["GET"])
 def login():
@@ -44,6 +60,7 @@ def login():
         return responseApi({"error": "invalid_email_password"}, 400)
 
     if login_type == 'register':
+        current_app.limiter.limit("20 per 30 minutes")(lambda: None)()
         existing_user = User.query.filter_by(email=email).first()
         if existing_user:
             return responseApi({"error": "user_exists"}, 400)
@@ -124,20 +141,32 @@ def check_auth():
 
 @bp.route('/recover_password', methods=["GET"])
 def recover_password():
+    current_app.limiter.limit("10 per 30 minutes")(lambda: None)()
     email = request.args.get('email')
-    resend.api_key = os.getenv('RESEND_API_KEY')
     user = User.query.filter_by(email=email).first()
     if not user:
         return responseApi({"error": "invalid_email"}, 400)
     recover_token = generate_jwt_token(user.id)
     reset_link = f"{os.getenv('FRONTEND_URL')}/login?recover_token={recover_token}"
     try:
-        #response = resend.Emails.send({
-        #    "from": "onboarding@resend.dev",
-        #    "to": email,
-        #    "subject": 'Recuperar senha - Project X',
-        #    "html": f"<p>Olá, clique no link abaixo para redefinir sua senha:</p><a href='{reset_link}' target='_blank'>{reset_link}</a>"
-        #})
+        html = f"""
+        <p>Olá</p>
+
+        <p>Clique no link abaixo para redefinir sua senha:</p>
+
+        <a href="{reset_link}">
+            Redefinir senha
+        </a>
+
+        <p>Ou copie o link:</p>
+
+        <p>{reset_link}</p>
+        """
+        send_email_recovery(
+            email,
+            "Recuperar senha - REDONDO.GG",
+            html
+        )
         return responseApi({"message": "email_sent"}, 200)
     except Exception as e:
         print("Erro ao enviar e-mail:", e)

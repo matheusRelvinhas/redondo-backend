@@ -2,6 +2,8 @@ import os
 from flask import Flask
 from flask_cors import CORS
 from flask_caching import Cache
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from models import db
 from routes.register_blueprints import register_blueprints
 from dotenv import load_dotenv
@@ -20,6 +22,12 @@ app.config['CACHE_TYPE'] = 'FileSystemCache'
 app.config['CACHE_DIR'] = 'cache'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 60 * 20
 cache = Cache(app)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[]
+)
 
 oauth = OAuth(app)
 oauth.register(
@@ -44,6 +52,7 @@ with app.app_context():
         print(f"Error create tables: {e}")
 
 app.cache = cache
+app.limiter = limiter
 
 if __name__ == '__main__':
     app.run(

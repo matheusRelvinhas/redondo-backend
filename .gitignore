@@ -23,4 +23,4 @@ cache/
 .idea/
 *.swp
 
-ngrok.exe
+*ngrok.exe
