@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from email_validator import validate_email, EmailNotValidError
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User
-from utils import responseApi, get_access_and_user
+from utils import responseApi, get_access_and_user, token_service_required
 from email.mime.text import MIMEText
 
 def validate_email_function(email: str) -> bool:
@@ -29,12 +29,6 @@ def generate_jwt_token(user_id):
     encode = jwt.encode(payload, os.getenv('JWT_SECRET_KEY'), algorithm='HS256')
     return encode
 
-def get_bearer_token():
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.startswith("Bearer "):
-        return None
-    return auth.split("Bearer ")[1]
-
 def send_email_recovery(to_email, subject, html):
     smtp_server = "smtp.gmail.com"
     smtp_port = 587
@@ -52,6 +46,7 @@ def send_email_recovery(to_email, subject, html):
 
 bp = Blueprint('login', __name__, url_prefix='/api/login')
 @bp.route('', methods=["GET"])
+@token_service_required
 def login():
     email = request.args.get('email')
     password = request.args.get('pwd')
@@ -60,7 +55,7 @@ def login():
         return responseApi({"error": "invalid_email_password"}, 400)
 
     if login_type == 'register':
-        current_app.limiter.limit("20 per 30 minutes")(lambda: None)()
+        current_app.limiter.limit("20 per 10 minutes")(lambda: None)()
         existing_user = User.query.filter_by(email=email).first()
         if existing_user:
             return responseApi({"error": "user_exists"}, 400)
@@ -72,6 +67,7 @@ def login():
         return responseApi({"message": "user_registered", "user_id": new_user.id, "token": token_jwt}, 200)
 
     elif login_type == 'login':
+        current_app.limiter.limit("30 per 1 minutes")(lambda: None)()
         user = User.query.filter_by(email=email).first()
         if not user:
             return responseApi({"error": "user_not_found"}, 400)
@@ -86,12 +82,14 @@ def login():
 
 @bp.route('/google')
 def google_login():
+    current_app.limiter.limit("30 per 1 minutes")(lambda: None)()
     google = current_app.oauth.create_client('google')
     redirect_uri = f"{os.getenv('BACKEND_URL')}/api/login/google/callback"
     return google.authorize_redirect(redirect_uri)
 
 @bp.route('/google/callback')
 def google_callback():
+    current_app.limiter.limit("30 per 1 minutes")(lambda: None)()
     google = current_app.oauth.create_client('google')
     google.authorize_access_token()
     user_info = google.userinfo()
@@ -113,19 +111,17 @@ def google_callback():
     return redirect(redirect_url)
 
 @bp.route('/logout', methods=["GET"])
+@token_service_required
 def logout():
-    token = get_bearer_token()
-    if not token:
-        return responseApi({"error": "missing_token"}, 400)
-    get_access_and_user(token)
+    current_app.limiter.limit("30 per 1 minutes")(lambda: None)()
+    get_access_and_user()
     return responseApi({"message": "logout_success"}, 200)
 
 @bp.route('/check_auth', methods=["GET"])
+@token_service_required
 def check_auth():
-    token = get_bearer_token()
-    if not token:
-        return responseApi({"error": "missing_token"}, 400)
-    user = get_access_and_user(token)
+    current_app.limiter.limit("60 per 1 minutes")(lambda: None)()
+    user = get_access_and_user()
     if isinstance(user, User):
         return responseApi(
             {
@@ -140,8 +136,9 @@ def check_auth():
         return responseApi({"error": "user_not_found"}, 400)
 
 @bp.route('/recover_password', methods=["GET"])
+@token_service_required
 def recover_password():
-    current_app.limiter.limit("10 per 30 minutes")(lambda: None)()
+    current_app.limiter.limit("30 per 10 minutes")(lambda: None)()
     email = request.args.get('email')
     user = User.query.filter_by(email=email).first()
     if not user:
@@ -173,7 +170,9 @@ def recover_password():
         return responseApi({"error": "error_recover_password"}, 400)
 
 @bp.route('/reset_password', methods=["GET"])
+@token_service_required
 def reset_password():
+    current_app.limiter.limit("30 per 10 minutes")(lambda: None)()
     recover_token = request.args.get('recover_token')
     new_password = request.args.get("new_password")
     if not recover_token or not new_password or not validate_password(new_password):

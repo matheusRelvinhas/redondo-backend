@@ -358,3 +358,16 @@ class GamesInfo(db.Model):
         data["team2_img_url"] = team2_img_url
         data["winner_team_slug"] = winner_team_slug
         return data
+
+class AiAnalytics(db.Model):
+    __tablename__ = 'ai_analytics'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug =  db.Column(db.String(100), nullable=False)
+    target_type = db.Column(db.String(100), nullable=False)
+    pt_text = db.Column(db.TEXT, nullable=True)
+    #en_text = db.Column(db.String(100), nullable=True)
+    finished = db.Column(db.Boolean, default=False)
+    
+    created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
+    updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)

@@ -1,60 +1,9 @@
-from flask import Blueprint, request, Response, current_app
+from flask import Blueprint, request, current_app
 from models import PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months
-from utils import responseApi
-import requests
+from utils import responseApi, token_service_required
 
-bp = Blueprint('player_stats', __name__, url_prefix='/api/player_stats')
-
-@bp.route('', methods=["GET"])
-def player_stats():
-    period = request.args.get('period')
-    game_count = request.args.get('game_count')
-    if not period or not game_count:
-        return responseApi({"error": "missing_arguments"}, 400)
-    cache_key = f"stats_player::{period}::{game_count}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        return responseApi(cached, 200)
-    model = {
-        'last_month': PlayerStatsLastMonth,
-        '3_months': PlayerStats3Months,
-        '6_months': PlayerStats6Months,
-        '12_months': PlayerStats12Months
-    }.get(period)
-    if not model:
-        return responseApi({"error": "invalid_period"}, 400)
-    players = model.query.filter(model.games_count >= game_count).all()
-    result = {"players": [p.to_dict() for p in players]}
-    current_app.cache.set(cache_key, result, timeout=60 * 20)
-    return responseApi(result, 200)
-
-@bp.route('/player', methods=["GET"])
-def player():
-    slug = request.args.get('slug')
-    period = request.args.get('period')
-    if not slug:
-        return responseApi({"error": "missing_slug"}, 400)
-    model_map = {
-        '1': PlayerStatsLastMonth,
-        '3': PlayerStats3Months,
-        '6': PlayerStats6Months,
-        '12': PlayerStats12Months
-    }
-
-    if period and period in model_map:
-        periods_to_query = {period: model_map[period]}
-        cache_suffix = period
-    else:
-        periods_to_query = model_map
-        cache_suffix = "all"
-
-    cache_key = f"player_info::{slug}::{cache_suffix}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        return responseApi(cached, 200)
-
+def player_info(periods_to_query, slug):
     stats_list = []
-
     (
         nickname, first_name, last_name, 
         team_name, team_slug, img_url, 
@@ -85,9 +34,6 @@ def player():
         player_data['period'] = period_key
         stats_list.append(player_data)
 
-    if not stats_list:
-        return responseApi({"error": "player_not_found"}, 404)
-
     result = {
         "slug": slug,
         "nickname": nickname,
@@ -102,44 +48,66 @@ def player():
         "team_points": team_points,
         "stats": stats_list
     }
+    return result
 
-    current_app.cache.set(cache_key, result, timeout=60 * 20)
-    return responseApi(result, 200)
-    
+bp = Blueprint('player_stats', __name__, url_prefix='/api/player_stats')
 
-@bp.route('/player_image', methods=["GET"])
-def player_image():
-    slug = request.args.get('slug')
+@bp.route('', methods=["GET"])
+@token_service_required
+def player_stats():
     period = request.args.get('period')
-    if not slug:
-        return responseApi({"error": "missing_slug"}, 400)
-    cache_key = f"image_player::{slug}::{period or 'all'}"
-    cached_img = current_app.cache.get(cache_key)
-    if cached_img:
-        return Response(cached_img, mimetype="image/webp")
-    model_map = {
+    game_count = request.args.get('game_count')
+    if not period or not game_count:
+        return responseApi({"error": "missing_arguments"}, 400)
+    cache_key = f"stats_player::{period}::{game_count}"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
+        return responseApi(cached, 200)
+    model = {
         'last_month': PlayerStatsLastMonth,
         '3_months': PlayerStats3Months,
         '6_months': PlayerStats6Months,
         '12_months': PlayerStats12Months
+    }.get(period)
+    if not model:
+        return responseApi({"error": "invalid_period"}, 400)
+    players = model.query.filter(model.games_count >= game_count).all()
+    result = {"players": [p.to_dict() for p in players]}
+    current_app.cache.set(cache_key, result, timeout=60 * 20)
+    return responseApi(result, 200)
+
+@bp.route('/player', methods=["GET"])
+@token_service_required
+def player():
+    slug = request.args.get('slug')
+    period = request.args.get('period')
+    if not slug:
+        return responseApi({"error": "missing_slug"}, 400)
+    model_map = {
+        '1': PlayerStatsLastMonth,
+        '3': PlayerStats3Months,
+        '6': PlayerStats6Months,
+        '12': PlayerStats12Months
     }
-    player = None
-    if period:
-        model = model_map.get(period)
-        if not model:
-            return responseApi({"error": "invalid_period"}, 400)
-        player = model.query.filter_by(slug=slug).first()
+
+    if period and period in model_map:
+        periods_to_query = {period: model_map[period]}
+        cache_suffix = period
     else:
-        for model in model_map.values():
-            player = model.query.filter_by(slug=slug).first()
-            if player:
-                break
-    if not player or not player.image_url:
+        periods_to_query = model_map
+        cache_suffix = "all"
+
+    cache_key = f"player_info::{slug}::{cache_suffix}"
+    cached = current_app.cache.get(cache_key)
+    if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
+        return responseApi(cached, 200)
+    
+    result = player_info(periods_to_query, slug)
+    
+    if not result['stats']:
         return responseApi({"error": "player_not_found"}, 404)
-    try:
-        res = requests.get(player.image_url, timeout=3)
-        res.raise_for_status()
-        current_app.cache.set(cache_key, res.content, timeout=1800)
-        return Response(res.content, mimetype="image/webp")
-    except requests.RequestException:
-        return responseApi({"error": "failed_to_fetch_image"}, 502)
+
+    current_app.cache.set(cache_key, result, timeout=60 * 20)
+    return responseApi(result, 200)

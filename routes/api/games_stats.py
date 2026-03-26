@@ -1,6 +1,6 @@
 from flask import Blueprint, request, current_app
 from models import db, GamesInfo, LeaguesInfo, TeamsInfo
-from utils import responseApi
+from utils import responseApi, token_service_required
 from datetime import datetime, timedelta
 from sqlalchemy.orm import undefer, load_only
 import pytz
@@ -16,7 +16,28 @@ def clean_game_side_stats(game_side_stats):
                 round_data.pop("game_round_team_clans", None)
     return game_side_stats
 
+def game_info_stat(game_slug, game_stat):
+    column = getattr(GamesInfo, game_stat)
+    game = (
+        db.session.query(GamesInfo)
+        .options(
+            load_only(GamesInfo.slug),
+            undefer(column),
+        )
+        .filter(GamesInfo.slug == game_slug)
+        .first()
+    )
+    if not game:
+        return None
+    result = {}
+    data = getattr(game, game_stat)
+    if game_stat == "game_side_stats":
+        data = clean_game_side_stats(data)
+    result[f"{game_stat}"] = data
+    return result
+
 @bp.route('', methods=["GET"])
+@token_service_required
 def games_stats():
     period = request.args.get('period')
     league = request.args.get('league')
@@ -25,6 +46,7 @@ def games_stats():
     cache_key = f"games_stats::{period or league}"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
     brasil_tz = pytz.timezone('America/Sao_Paulo')
     now = datetime.now(brasil_tz)
@@ -65,33 +87,39 @@ def games_stats():
     return responseApi(result, 200)
 
 @bp.route('/current', methods=["GET"])
+@token_service_required
 def games_current():
     games = GamesInfo.query.filter_by(status='current').all()
     games_list = [game.to_dict() for game in games]
     cache_key = f"games_stats::current"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
     current_app.cache.set(cache_key, {"games": games_list}, timeout=2*10)
     return responseApi({"games": games_list}, 200)
 
 @bp.route('/upcoming', methods=["GET"])
+@token_service_required
 def games_upcoming():
     cache_key = "games_stats::upcoming"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
     games = GamesInfo.query.filter_by(status='upcoming').all()
     games_list = [game.to_dict() for game in games]
     result = {"games": games_list}
-    current_app.cache.set(cache_key, result, timeout=60 * 20)
+    current_app.cache.set(cache_key, result, timeout=60*10)
     return responseApi(result, 200)
 
 @bp.route('/periods', methods=["GET"])
+@token_service_required
 def games_periods():
     cache_key = "games_periods::"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
     games = GamesInfo.query.with_entities(GamesInfo.start_date).all()
     periods_set = set()
@@ -109,10 +137,12 @@ def games_periods():
     return responseApi(periods, 200)
 
 @bp.route("/leagues", methods=["GET"])
+@token_service_required
 def games_leagues():
     cache_key = "games_leagues::"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
     subq = (
         db.session.query(GamesInfo.league_id)
@@ -131,10 +161,12 @@ def games_leagues():
     return responseApi(result, 200)
 
 @bp.route("/teams", methods=["GET"])
+@token_service_required
 def games_teams():
     cache_key = "games_teams::"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
     games = db.session.query(GamesInfo.team1_id, GamesInfo.team2_id).all()
     team_ids = set()
@@ -155,11 +187,13 @@ def games_teams():
     return responseApi(result, 200)
 
 @bp.route("/game", methods=["GET"])
+@token_service_required
 def game():
     game_slug = request.args.get('slug')
     cache_key = f"game/{game_slug}::"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
     game = (
         db.session.query(GamesInfo)
@@ -169,10 +203,11 @@ def game():
     if not game:
         return responseApi({"error": "Game not found"}, 404)
     result = game.to_dict()
-    current_app.cache.set(cache_key, result, timeout=60 * 10)
+    current_app.cache.set(cache_key, result, timeout=60*10)
     return responseApi(result, 200)
 
 @bp.route("/game_info", methods=["GET"])
+@token_service_required
 def game_info():
     game_slug = request.args.get('slug')
     game_stat = request.args.get('game_stat')
@@ -186,26 +221,10 @@ def game_info():
     cache_key = f"game_info/{game_slug}&{game_stat}::"
     cached = current_app.cache.get(cache_key)
     if cached:
+        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
         return responseApi(cached, 200)
-    column = getattr(GamesInfo, game_stat)
-    game = (
-        db.session.query(GamesInfo)
-        .options(
-            load_only(GamesInfo.slug),
-            undefer(column),
-        )
-        .filter(GamesInfo.slug == game_slug)
-        .first()
-    )
-    
-    if not game:
+    result = game_info_stat(game_slug, game_stat)
+    if not result:
         return responseApi({"error": "Game not found"}, 404)
-    result = {}
-    data = getattr(game, game_stat)
-
-    if game_stat == "game_side_stats":
-        data = clean_game_side_stats(data)
-
-    result[f"{game_stat}"] = data
-    current_app.cache.set(cache_key, result, timeout=60 * 30)
+    current_app.cache.set(cache_key, result, timeout=60*30)
     return responseApi(result, 200)
