@@ -365,6 +365,7 @@ class AiAnalytics(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     slug =  db.Column(db.String(100), nullable=False)
     target_type = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(20), nullable=False)
     pt_text = db.Column(db.TEXT, nullable=True)
     #en_text = db.Column(db.String(100), nullable=True)
     finished = db.Column(db.Boolean, default=False)

@@ -31,7 +31,9 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=[]
+    default_limits=[],
+    storage_uri="memory://",
+    strategy="moving-window"
 )
 app.limiter = limiter
 

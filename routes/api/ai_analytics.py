@@ -1,209 +1,320 @@
-import json
-import os
+import threading
+import time
+import traceback
 from flask import Blueprint, request, current_app
 from models import db, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, AiAnalytics
 from routes.api.player_stats import player_info
-from routes.api.teams_stats import get_team_games_info
+from routes.api.teams_stats import get_team_info, get_team_players_info, get_team_games_info, get_team_maps_info, get_team_leagues_info
 from routes.api.games_stats import game_info_stat
-from openai import OpenAI
 from utils import responseApi, token_service_required, get_access_and_user
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from loguru import logger
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
 
 bp = Blueprint('ai_analytics', __name__, url_prefix='/api/ai_analytics')
 
-def get_player_ai_anlytics(player_slug):
-    model_map = {
-        '1': PlayerStatsLastMonth,
-        '3': PlayerStats3Months,
-        '6': PlayerStats6Months,
-        '12': PlayerStats12Months
+CS2_MAPS = {
+    "de_dust2": "Dust 2", "de_mirage": "Mirage", "de_inferno": "Inferno",
+    "de_nuke": "Nuke", "de_overpass": "Overpass", "de_ancient": "Ancient", "de_anubis": "Anubis"
+}
+
+def round_floats(data, decimals=2):
+    if isinstance(data, dict):
+        return {k: (f"{int(round(v))}%" if k == "performance" and isinstance(v, (int, float)) 
+                   else round_floats(v, decimals)) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [round_floats(v, decimals) for v in data]
+    elif isinstance(data, float):
+        return round(data, decimals)
+    return data
+
+def get_performance_class(percentage):
+    if isinstance(percentage, str):
+        value = int(percentage.rstrip('%'))
+    else:
+        value = int(percentage)
+    if value < 35:
+        return 'text-danger'
+    elif value < 70:
+        return 'text-tr'
+    else:
+        return 'text-success'
+
+def delete_old_pending_analytics(slug: str, target_type: str):
+    two_minutes_ago = int(time.time()) - 120
+    old = db.session.query(AiAnalytics).filter(
+        AiAnalytics.slug == slug, AiAnalytics.target_type == target_type,
+        AiAnalytics.status == 'pending', AiAnalytics.created_at <= two_minutes_ago
+    ).all()
+    for item in old:
+        db.session.delete(item)
+    db.session.commit()
+
+def get_team_ai_analytics(team_slug):
+    team = get_team_info(team_slug)
+    if isinstance(team, tuple) or not team:
+        return None
+    players_data = get_team_players_info(team.team_id)
+    games_info = get_team_games_info(team_slug)
+    aggregated_stats = {}
+    for period in ["12_months", "6_months", "3_months", "last_month"]:
+        period_stats = [p[period] for p in players_data if p.get(period)]
+        if period_stats:
+            aggregated_stats[period] = {k: round(sum(s.get(k, 0) for s in period_stats) / len(period_stats), 2) 
+                                       for k in ['avg_kills', 'avg_death', 'avg_damage', 'avg_assists']}
+        else:
+            aggregated_stats[period] = {k: 0 for k in ['avg_kills', 'avg_death', 'avg_damage', 'avg_assists']}
+    return round_floats({
+        "team_info": team.to_dict(),
+        "aggregated_stats": aggregated_stats,
+        "games_info": games_info['wl_info'],
+        "recent_games": sorted(games_info['games'], key=lambda x: x.get("start_timestamp", 0), reverse=True)[:5],
+        "all_games": games_info['games']
+    }, 2)
+
+def format_intro(name, rank, country, region=None):
+    name = name or "Equipe"
+    return (f"{name} é uma equipe profissional de Counter-Strike do país {country} "
+            f"(região {region}), atualmente ocupando a posição #{rank} no ranking mundial."
+            if region else 
+            f"{name} ({country}) é um jogador profissional de Counter-Strike, "
+            f"atualmente na posição #{rank} no ranking mundial.")
+
+def format_stats(stats, is_team=False):
+    period_labels = {"last_month": "no último mês", "3_months": "nos últimos 3 meses", 
+                     "6_months": "nos últimos 6 meses", "12_months": "nos últimos 12 meses"}
+    if not is_team:
+        return " ".join([f"{period_labels.get(period, period)}, o jogador apresenta em média "
+                        f"{data.get('avg_kills', 0)} kills por round, {data.get('avg_death', 0)} mortes, "
+                        f"{data.get('avg_damage', 0)} de dano (ADR)" for period, data in stats.items() if period in period_labels])
+    
+    text_6m = stats.get('6_months', {})
+    return f"Nos últimos 6 meses, em média a equipe apresenta {text_6m.get('avg_kills', 0)} kills por round, {text_6m.get('avg_death', 0)} mortes por round, {text_6m.get('avg_damage', 0)} de ADR e {text_6m.get('avg_assists', 0)} assistências por round."
+
+def format_performance(perf, only_6m=False):
+    period_labels = {"last_month": "Último mês", "3_months": "Últimos 3 meses",
+                     "6_months": "Últimos 6 meses", "12_months": "Últimos 12 meses"}
+    
+    if only_6m:
+        data = perf.get('6_months', {})
+        perf_value = data.get('performance', 'N/A')
+        perf_class = get_performance_class(perf_value)
+        perf_html = f"<strong class='{perf_class}'>{perf_value}</strong>" if perf_value != 'N/A' else perf_value
+        return f"Nos últimos 6 meses, {data.get('win', 0)}V-{data.get('lose', 0)}D ({perf_html} aproveitamento)."
+    
+    period_order = ["last_month", "3_months", "6_months", "12_months"]
+    result = []
+    for p in period_order:
+        if p in perf:
+            data = perf.get(p, {})
+            perf_value = data.get('performance', 'N/A')
+            perf_class = get_performance_class(perf_value)
+            perf_html = f"<strong class='{perf_class}'>{perf_value}</strong>" if perf_value != 'N/A' else perf_value
+            result.append(f"<p><strong>{period_labels.get(p, p)}:</strong> {data.get('win', 0)}V-{data.get('lose', 0)}D ({perf_html} aproveitamento).</p>")
+    return "".join(result)
+
+def format_maps(games, team_slug, only_6m=False):
+    if not games:
+        return "Sem dados de mapa."
+    maps_info = get_team_maps_info(games)
+    if not maps_info:
+        return "Sem dados de mapa."
+    now = time.time()
+    periods = {"6_months": 182*24*60*60, "12_months": 365*24*60*60} if only_6m else {
+        "last_month": 30*24*60*60, "3_months": 91*24*60*60, "6_months": 182*24*60*60, "12_months": 365*24*60*60
     }
-    player = player_info(model_map, player_slug)
-    if player['slug'] != player_slug: return None
-    stats_keys = [
-        'avg_kills', 'avg_death', 'avg_damage',
-        'avg_assists', 'avg_ak47_kills', 'avg_ak47_damage', 'avg_awp_kills', 
-        'avg_awp_damage', 'avg_m4a1_kills', 'avg_m4a1_damage',
-        'avg_m4a4_kills', 'avg_m4a4_damage', 
-    ]
-    filtered_stats = []
-    for stat in player["stats"]:
-        filtered_stat = {key: stat.get(key) for key in stats_keys}
-        if stat.get("period") == '1': perido_name = 'last_month'
-        if stat.get("period") == '3': perido_name = '3_months'
-        if stat.get("period") == '6': perido_name = '6_months'
-        if stat.get("period") == '12': perido_name = '12_months'
-        filtered_stat["period"] = perido_name
-        filtered_stats.append(filtered_stat)
-    player["stats"] = filtered_stats
-    if (player['team_slug']):
-        games_info = get_team_games_info(player['team_slug'])
-    if games_info['games']:
-        recent_games_slugs = [
-            game["slug"]
-            for game in sorted(games_info['games'], key=lambda x: x["start_timestamp"], reverse=True)[:5]
-        ]
-        allowed_player_stats_keys = [
-            "adr", "death", "kills", "damage", "assists",
-            "clutches", "headshots", "multikills",
-            "first_death", "first_kills",
-            "trade_death", "trade_kills",
-            "enemy_team_name"
-        ]
-        recent_games_with_player = []
-        for game_slug in recent_games_slugs:
-            game_i_s = game_info_stat(game_slug, 'players_stats')
-            if not game_i_s or 'players_stats' not in game_i_s:
-                continue
-            player_stats = next(
-                (p for p in game_i_s['players_stats'] if p.get('slug') == player_slug),
-                None
-            )
-            if player_stats:
-                filtered_player_stats = {
-                    key: player_stats[key]
-                    for key in allowed_player_stats_keys
-                    if key in player_stats
-                }
-                recent_games_with_player.append({
-                    "game_slug": game_slug,
-                    "player_stats": filtered_player_stats
-                })
-    return {
-        "player_info": player,  
-        "games_info_team": games_info['wl_info'],
-        "recent_games_stats_player": recent_games_with_player
-    }
+    map_stats = {p: {} for p in periods}
+    for map_data in maps_info:
+        map_code = map_data.get('map_name')
+        if map_code not in CS2_MAPS or (map_data.get('team1_slug') != team_slug and map_data.get('team2_slug') != team_slug):
+            continue
+        map_name = CS2_MAPS[map_code]
+        timestamp = map_data.get('start_timestamp', 0)
+        won = map_data.get('winner_team') == team_slug
+        for period, seconds in periods.items():
+            if timestamp >= now - seconds:
+                if map_name not in map_stats[period]:
+                    map_stats[period][map_name] = {'wins': 0, 'losses': 0}
+                map_stats[period][map_name]['wins' if won else 'losses'] += 1
+    def build_maps_text(period_maps):
+        played = []
+        rare = []
+        never = []
+        for name in CS2_MAPS.values():
+            if name in period_maps:
+                total = period_maps[name]['wins'] + period_maps[name]['losses']
+                if total >= 3:
+                    wr = round(period_maps[name]['wins'] / total * 100)
+                    wr_class = get_performance_class(wr)
+                    wr_html = f"<strong class='{wr_class}'>{wr}%</strong>"
+                    played.append(f"<li><strong>{name}</strong>: {period_maps[name]['wins']}V-{period_maps[name]['losses']}D ({wr_html} em {total} mapas)</li>")
+                else:
+                    rare.append(f"{name} ({total})")
+            else:
+                never.append(name)
+        result = []
+        if played:
+            result.append(f"<ul>{''.join(played)}</ul>")
+        veto_items = []
+        if rare:
+            veto_items.append(f"<li><strong>Raramente:</strong> {', '.join(rare)}</li>")
+        if never:
+            veto_items.append(f"<li><strong>Veto fixo:</strong> {', '.join(never)}</li>")
+        if veto_items:
+            result.append(f"<ul>{''.join(veto_items)}</ul>")
+        return "".join(result) if result else "Sem dados de mapas"
+    if only_6m:
+        maps = map_stats.get('6_months', {})
+        return build_maps_text(maps)
+    period_pt = {"last_month": "Último mês", "3_months": "Últimos 3 meses", "6_months": "Últimos 6 meses", "12_months": "Últimos 12 meses"}
+    result = []
+    for p in ["last_month", "3_months", "6_months", "12_months"]:
+        maps = map_stats.get(p)
+        if not maps:
+            continue
+        played_only = []
+        for name in CS2_MAPS.values():
+            if (s := maps.get(name)) and (s['wins'] + s['losses']) > 0:
+                wr_percent = round(s['wins']/(s['wins']+s['losses'])*100)
+                wr_class = get_performance_class(wr_percent)
+                wr_html = f"<strong class='{wr_class}'>{wr_percent}%</strong>"
+                played_only.append(f"<li><strong>{name}</strong>: {s['wins']}V-{s['losses']}D ({wr_html} em {s['wins']+s['losses']} mapas)</li>")
+        if p in ["6_months", "12_months"]:
+            text = f"<p><strong>{period_pt.get(p, p)}:</strong></p>" + build_maps_text(maps)
+        else:
+            text = (f"<p><strong>{period_pt.get(p, p)}:</strong></p><ul>{''.join(played_only)}</ul>" if played_only else "")
+        if text:
+            result.append(text)
+    return "".join(result) if result else "Sem dados de mapas"
 
-def generate_player_analysis(player_slug: str):
-    client = OpenAI(api_key=current_app.config["OPENAI_API_KEY"])
-    data = get_player_ai_anlytics(player_slug)
-    if data is None: return None
-    player_info = data.get("player_info", {})
-    team_info = data.get("games_info_team", {})
-    recent_games = data.get("recent_games_stats_player", [])
-    stats = player_info.get("stats", [])
-    def get_period(period_name):
-        return next((s for s in stats if s.get("period") == period_name), {})
-    last_month = get_period("last_month")
-    three_months = get_period("3_months")
-    six_months = get_period("6_months")
-    twelve_months = get_period("12_months")
-    context_data = {
-        "player": {
-            "nickname": player_info.get("nickname"),
-            "name": f"{player_info.get('first_name')} {player_info.get('last_name')}",
-            "team": player_info.get("team_name"),
-            "team_rank": player_info.get("team_rank"),
-            "country": player_info.get("country_code"),
-        },
-        "stats": {
-            "last_month": last_month,
-            "3_months": three_months,
-            "6_months": six_months,
-            "12_months": twelve_months,
-        },
-        "team_performance": team_info,
-        "recent_games": recent_games
-    }
-    prompt = f"""
-You are a professional CS2 esports analyst.
+def format_leagues(team_slug):
+    leagues = get_team_leagues_info(team_slug)
+    if not leagues:
+        return "<p>O time não participou de ligas no período.</p>"
+    recent = sorted(leagues, key=lambda x: x.get('start_timestamp', 0), reverse=True)[:5]
+    items = []
+    for l in recent:
+        league_name = l.get('name', 'Liga')
+        status = l.get('status', 'finished')
+        if status == 'current':
+            items.append(f"<li>{league_name} (Em Andamento)</li>")
+        elif status == 'finished':
+            team_place = None
+            prizes = l.get('tournament_prizes', [])
+            if isinstance(prizes, list):
+                for prize in prizes:
+                    if isinstance(prize, dict):
+                        teams_data = prize.get('teams', {})
+                        if isinstance(teams_data, dict) and teams_data.get('slug') == team_slug:
+                            team_place = prize.get('place')
+                            break
+            if team_place:
+                if team_place == '1st': items.append(f"<li><strong>{league_name} - {team_place} lugar 🏆</strong></li>")
+                else: items.append(f"<li>{league_name} - {team_place} lugar</li>")
+            else: items.append(f"<li>{league_name}</li>")
+        else: items.append(f"<li>{league_name}</li>")
+    return f"<ul>{''.join(items)}</ul>"
 
-Your task is to analyze a player based on structured statistical data.
+def format_recent_games(games, team_slug=None, for_llm=False):
+    if not games:
+        return "Sem partidas recentes." if for_llm else "<p>Sem partidas recentes.</p>"
+    if for_llm:
+        wins = sum(1 for g in games if (g.get('team1_slug') == team_slug and g.get('team1_score', 0) > g.get('team2_score', 0)) 
+                  or (g.get('team2_slug') == team_slug and g.get('team2_score', 0) > g.get('team1_score', 0)))
+        return f"Últimas {len(games)} partidas: {wins}V-{len(games)-wins}D ({round(wins/len(games)*100 if games else 0)}% aproveitamento)"
+    items = []
+    for g in games:
+        is_team1 = g.get('team1_slug') == team_slug
+        opponent = g.get('team2_name' if is_team1 else 'team1_name', 'Oponente')
+        t_score = g.get('team1_score' if is_team1 else 'team2_score', 0)
+        opp_score = g.get('team2_score' if is_team1 else 'team1_score', 0)
+        result = "VITÓRIA" if t_score > opp_score else "DERROTA"
+        color = "success" if result == "VITÓRIA" else "danger"
+        items.append(f"<li>Vs {opponent}: <strong>{t_score}x{opp_score}</strong> - <strong class='text-{color}'>{result}</strong></li>")
+    wins = sum(1 for i in items if "VITÓRIA" in i)
+    return (f"<ul>{''.join(items)}</ul><p>Últimas 5 partidas: <strong>{wins}V - {len(items)-wins}D</strong> "
+            f"(Desempenho: <strong class='{get_performance_class(wins/len(items)*100 if items else 0)}'>{round(wins/len(items)*100)}%</strong>)</p>")
 
-IMPORTANT RULES:
-- Always respond in Brazilian Portuguese (pt-BR).
-- Be clear, natural, and professional (like an esports analyst from HLTV).
-- Do NOT invent any data.
-- Keep the response concise (maximum 200 words).
+def generate_team_analysis(app, analysis_id: int, team_slug: str):
+    with app.app_context():
+        try:
+            data = get_team_ai_analytics(team_slug)
+            if not data or len(data.get("recent_games")) == 0:
+                team_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
+                if team_analytic:
+                    team_analytic.pt_text = "Sem dados suficientes para análise."
+                    team_analytic.status = 'success'
+                    db.session.commit()
+                return
+            team_info = data.get("team_info", {})
+            if not isinstance(team_info, dict) and hasattr(team_info, 'to_dict'):
+                team_info = team_info.to_dict()
+            maps_6m = format_maps(data.get("all_games", []), team_slug, True)
+            leagues = format_leagues(team_slug)     
+            prompt = PromptTemplate.from_template("""
+You are a professional CS2 esports analyst writing a human expert analysis (not structured with numbers).
+Write organic, flowing text about the team's positioning and recent form. Focus on last 6 months.
+RULES: Brazilian Portuguese only, valid HTML tags only (<p>,<strong>,<br>), max ~200 words, no invented data, NO NUMBERED LISTS.
+Use <strong> tags to highlight: team name, key statistics, relevant performance data, and important achievements.
+Write as an expert would: discuss team positioning, current form, performance trends, and map strengths naturally.
+DATA: Team: {team} | Stats: {stats} | Performance: {performance} | Top Maps: {maps} | Active Leagues: {leagues} | Recent Form: {recent}""")
+            chain = prompt | ChatOpenAI(model="gpt-5-nano", api_key=current_app.config["OPENAI_API_KEY"])
+            team_name = team_info.get("name") or team_info.get("team_name") or ""
+            response = chain.invoke({
+                "team": format_intro(team_name, team_info.get("rank", ""), team_info.get("country_code", ""), team_info.get("region_code", "")),
+                "stats": format_stats(data.get("aggregated_stats", {}), is_team=True),
+                "performance": format_performance(data.get("games_info", {}), only_6m=True),
+                "maps": maps_6m,
+                "leagues": leagues,
+                "recent": format_recent_games(data.get("recent_games", []), team_slug, for_llm=True)
+            })
+            result = (f"{response.content.strip()}<br><strong>Desempenho por período:</strong><br>"
+                     f"{format_performance(data.get('games_info', {}))}<br><strong>Desempenho em mapas:</strong><br>"
+                     f"{format_maps(data.get('all_games', []), team_slug)}<br><strong>Ligas:</strong><br>"
+                     f"{leagues}<br><strong>Partidas Recentes:</strong><br>{format_recent_games(data.get('recent_games', []), team_slug)}") 
+            team_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
+            if team_analytic:
+                team_analytic.pt_text = result
+                team_analytic.status = 'success'
+                db.session.commit()
+        except Exception as e:
+            logger.error(f"team analysis error: {e}\n{traceback.format_exc()}")
 
-PRIORITY:
-- Give MORE weight to:
-  1. Last month stats (last_month)
-  2. Recent matches (recent_games)
-- Use older data (3, 6, 12 months) only for comparison and trend detection.
-
-INTERPRETATION RULES:
-- Translate all stat field names into natural language (no underscores).
-  Examples:
-    - first_kills → first kills
-    - trade_kills → trade kills
-    - avg_kills → average kills
-- When writing in Portuguese, adapt naturally:
-    - "first kills" → "primeiras kills"
-    - "trade kills" → "kills de troca"
-    - "average damage" → "dano médio"
-
-ANALYZE:
-- Current form (recent performance)
-- Consistency
-- Comparison with past performance
-- Impact within the team
-- Performance trend (improving or declining)
-
-TEAM CONTEXT:
-- Consider team performance (win rate and results)
-- Relate player performance to team success
-
-DATA:
-{json.dumps(context_data)}
-
-OUTPUT:
-Write a short analysis (1–2 paragraphs) covering:
-- Current form
-- Recent consistency
-- Performance trend
-- Overall impact
-
-Answer:
-"""
-    response = client.responses.create(
-        model="gpt-5-nano",
-        input=prompt,
-    )
-    result = response.output_text
-
-    return result
-
-
-@bp.route('/player', methods=["GET"])
+@bp.route('/team', methods=["GET"])
 @token_service_required
-def ai_analytics_player():
-    get_access_and_user()
-    slug = request.args.get('slug')
-    not_ai_return = request.args.get('not_ai_return')
-    if not slug:
-        return responseApi({"error": "missing_arguments"}, 400)
-    cache_key = f"ai_analytics_player::{slug}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
-        return responseApi(cached, 200)
-    brasilia_tz = ZoneInfo("America/Sao_Paulo")
-    one_week_ago = int((datetime.now(brasilia_tz) - timedelta(days=7)).timestamp())
-    player_analytic = (
-        db.session.query(AiAnalytics)
-        .filter(
-            AiAnalytics.slug == slug,
-            AiAnalytics.target_type == 'player',
-            AiAnalytics.created_at >= one_week_ago
-        )
-        .order_by(AiAnalytics.created_at.desc())
-        .first()
-    )
-    if not player_analytic:
-        if not_ai_return=='ok':
-            return responseApi({"not_ai_return": True}, 200)
-        result = generate_player_analysis(slug)
-        new_analytic = AiAnalytics(
-            slug=slug,
-            target_type='player',
-            pt_text=result,
-            finished=False,
-        )
-        db.session.add(new_analytic)
-        db.session.commit()
-    else: result = player_analytic.pt_text
-    current_app.cache.set(cache_key, {"ai_analytics_player": result}, timeout=60 * 60 * 24)
-    return responseApi({"ai_analytics_player": result}, 200)
+def ai_analytics_team():
+    try:
+        get_access_and_user()
+        slug = request.args.get('slug')
+        if not slug:
+            return responseApi({"error": "missing_arguments"}, 400)
+        delete_old_pending_analytics(slug, 'team')
+        cache_key = f"ai_analytics_team::{slug}"
+        cached = current_app.cache.get(cache_key)
+        if cached:
+            return responseApi(cached, 200)
+        brasilia_tz = ZoneInfo("America/Sao_Paulo")
+        one_week_ago = int((datetime.now(brasilia_tz) - timedelta(days=7)).timestamp())
+        team_analytic = db.session.query(AiAnalytics).filter(
+            AiAnalytics.slug == slug, AiAnalytics.target_type == 'team', AiAnalytics.created_at >= one_week_ago
+        ).order_by(AiAnalytics.created_at.desc()).first()
+        if team_analytic and team_analytic.status == 'pending':
+            return responseApi({"ai_analytics_team": None, "status": "pending"}, 200)
+        if not team_analytic:
+            if request.args.get('not_ai_return') == 'ok':
+                return responseApi({"not_ai_return": True}, 200)
+            new = AiAnalytics(slug=slug, target_type='team', status='pending')
+            db.session.add(new)
+            db.session.commit()
+            threading.Thread(target=generate_team_analysis, args=(current_app._get_current_object(), new.id, slug)).start()
+            return responseApi({"ai_analytics_team": None, "status": "pending"}, 200)
+        result = None
+        if team_analytic.status == 'success':
+            result = team_analytic.pt_text
+            current_app.cache.set(cache_key, {"ai_analytics_team": result, "status": "success"}, timeout=86400)
+        return responseApi({"ai_analytics_team": result, "status": team_analytic.status}, 200)
+    except Exception as e:
+        logger.error(f"team endpoint error: {e}\n{traceback.format_exc()}")
+        return responseApi({"error": "internal_error"}, 500)

@@ -1,6 +1,5 @@
-import requests
 import time
-from flask import Blueprint, request, Response, current_app
+from flask import Blueprint, request, current_app
 from models import TeamsInfo, PlayerStats12Months, PlayerStats6Months, PlayerStats3Months, PlayerStatsLastMonth, GamesInfo, LeaguesInfo, db
 from utils import responseApi, token_service_required
 from sqlalchemy import String, cast, func
@@ -62,28 +61,24 @@ def get_team_games_info(slug):
         (team1 == slug) | (team2 == slug)
     ).all()
     for game in last_games:
-        if game.team1_score is None or game.team2_score is None or not game.start_timestamp:
+        if not game.start_timestamp:
             continue
-        parts = game.slug.split('-vs-')
-        game_team1_slug = parts[0]
-        is_team1 = (game_team1_slug == slug)
-        won = False
-        if is_team1:
-            if game.team1_score > game.team2_score:
-                won = True
-        else:
-            if game.team2_score > game.team1_score:
-                won = True
+        winner_team_slug = None
+        if game.winner_team_id:
+            winner_team = db.session.query(TeamsInfo).filter_by(team_id=game.winner_team_id).first()
+            if winner_team:
+                winner_team_slug = winner_team.slug
         for period_name, threshold_timestamp in periods.items():
             if game.start_timestamp >= threshold_timestamp:
-                if won:
+                if winner_team_slug == slug:
                     wl_info[period_name]["win"] += 1
                 else:
                     wl_info[period_name]["lose"] += 1
     for period_name in wl_info.keys():
         win = wl_info[period_name]["win"]
         lose = wl_info[period_name]["lose"]
-        wl_info[period_name]["performance"] = calculate_win_percentage(win, lose)
+        total = win + lose
+        wl_info[period_name]["performance"] = round((win * 100) / total) if total > 0 else 0
     return {
         "games": [game.to_dict() for game in last_games],
         "wl_info": wl_info
