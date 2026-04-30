@@ -345,7 +345,7 @@ class GamesInfo(db.Model):
             team2_name = team2.team_name
             team2_slug = team2.slug
             if team2.image_url and "." in team2.image_url:
-                team2_img_url = f"{team2.slug}.{team2.image_url.rsplit('.', 1)[-1]}" 
+                team2_img_url = f"{team2.slug}.{team2.image_url.rsplit('.', 1)[-1]}"
         if self.winner_team_id:
             winner_team = TeamsInfo.query.filter_by(team_id=self.winner_team_id).first()
             if winner_team:
