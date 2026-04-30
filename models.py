@@ -239,7 +239,7 @@ class LeaguesInfo(db.Model):
                         }
                         if 'image_url' in team and isinstance(team['image_url'], str):
                             ext = team['image_url'].rsplit('.', 1)[-1].lower()
-                            filtered_team['img_url'] = f"{team["slug"]}.{ext}"
+                            filtered_team['img_url'] = f"{team['slug']}.{ext}"
                         else:
                             filtered_team['img_url'] = None
                         filtered_teams.append(filtered_team)
@@ -255,7 +255,7 @@ class LeaguesInfo(db.Model):
                             }
                             if 'image_url' in new_item["teams"] and isinstance(new_item["teams"]['image_url'], str):
                                 ext = new_item["teams"]['image_url'].rsplit('.', 1)[-1].lower()
-                                filtered_team['img_url'] = f"{new_item["teams"]['slug']}.{ext}"
+                                filtered_team['img_url'] = f"{new_item['teams']['slug']}.{ext}"
                             else:
                                 filtered_team['img_url'] = None
                             new_item["teams"] = filtered_team
@@ -323,7 +323,7 @@ class GamesInfo(db.Model):
                 league_name = league.name
                 league_slug = league.slug
                 if league.image_url and "." in league.image_url:
-                    league_img_url = f"{league.slug}.{league.image_url.rsplit(".", 1)[-1]}"
+                    league_img_url = f"{league.slug}.{league.image_url.rsplit('.', 1)[-1]}"
         data["league_name"] = league_name
         data["league_slug"] = league_slug
         data["league_img_url"] = league_img_url
@@ -339,13 +339,13 @@ class GamesInfo(db.Model):
             team1_name = team1.team_name
             team1_slug = team1.slug
             if team1.image_url and "." in team1.image_url:
-                team1_img_url = f"{team1.slug}.{team1.image_url.rsplit(".", 1)[-1]}"
+                team1_img_url = f"{team1.slug}.{team1.image_url.rsplit('.', 1)[-1]}"
         team2 = TeamsInfo.query.filter_by(team_id=self.team2_id).first()
         if team2:
             team2_name = team2.team_name
             team2_slug = team2.slug
             if team2.image_url and "." in team2.image_url:
-                team2_img_url = f"{team2.slug}.{team2.image_url.rsplit(".", 1)[-1]}"
+                team2_img_url = f"{team2.slug}.{team2.image_url.rsplit('.', 1)[-1]}"
         if self.winner_team_id:
             winner_team = TeamsInfo.query.filter_by(team_id=self.winner_team_id).first()
             if winner_team:

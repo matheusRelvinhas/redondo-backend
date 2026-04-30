@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: redondo-mysql
+    env_file: .env
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - redondo-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  flask:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: redondo-backend
+    env_file: .env
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/${MYSQL_DATABASE}
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - redondo-network
+    restart: unless-stopped
+
+  auto_db:
+    build:
+      context: .
+      dockerfile: Dockerfile.auto_db
+    container_name: redondo-auto-db
+    env_file: .env
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/${MYSQL_DATABASE}
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    depends_on:
+      - db
+      - flask
+    networks:
+      - redondo-network
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+
+networks:
+  redondo-network:
+    driver: bridge

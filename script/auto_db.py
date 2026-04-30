@@ -6,9 +6,11 @@ import traceback
 import math
 import threading
 from datetime import datetime, timedelta, timezone
+from loguru import logger
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models import db, GamesInfo, TeamsInfo, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo
-from app import app
+from app import create_app
 from sqlalchemy import or_, and_
 
 API_FINISHED_GAME_PART = "https://api.bo3.gg/api/v2/matches/finished?utc_offset=-10800&filter[tier][in]=s,a&filter[discipline_id][eq]=1&date="
@@ -23,9 +25,10 @@ API_FINISHED_LEAGUE_INFO_PART = "https://api.bo3.gg/api/v1/tournaments?scope=ind
 API_CURRENT_UPCOMING_LEAGUE_INFO_PART ="https://api.bo3.gg/api/v1/tournaments?scope=index-current-tournaments&sort=start_date&filter[tournaments.status][in]=current,upcoming&filter[tournaments.tier][in]=s,a&filter[tournaments.discipline_id][eq]=1&with=teams"
 API_GAME_TEAM_ROUNDS_PART = "https://api.bo3.gg/api/v1/games?sort=number&filter[games.match_id][eq]="
 
-
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+
+app = create_app()
 
 def safe_get(obj, *keys):
     for key in keys:
@@ -34,6 +37,7 @@ def safe_get(obj, *keys):
         elif isinstance(obj, list) and isinstance(key, int) and 0 <= key < len(obj):
             obj = obj[key]
         else:
+            logger.warning(f"Key '{key}' not found in object: {obj}")
             return None
     return obj
 
@@ -42,7 +46,7 @@ def get_range(api_url, limit, new_range=False):
     url_range = f"{api_url}&page[offset]=0&page[limit]={limit}"
     if new_range:
         url_range = f"{api_url}&page=1&per_page={limit}"
-    print(f"Getting range: {url_range}")
+    logger.info(f"Getting range: {url_range}")
     try:
         range_response = requests.get(url_range, timeout=60)
         range_response.raise_for_status()
@@ -55,7 +59,7 @@ def get_range(api_url, limit, new_range=False):
                 max_range = safe_get(range_data, "total", "count") + (limit+1)
         return max_range
     except requests.RequestException as e:
-        print(f"Error accessing {url_range}: {e}")
+        logger.error(f"Error accessing {url_range}: {e}")
 
 def get_oldest_date():
     games = db.session.query(GamesInfo).filter(GamesInfo.start_date != None).all()
@@ -113,8 +117,6 @@ def addOrAttGamesInfo(g, is_live):
         "league_id": safe_get(g, "tournament"),
         "games": safe_get(g, "games"),
     }
-    if is_live:
-        print(safe_get(g, "live_updates"))
     if not game:
         game = GamesInfo(**game_data)
         db.session.add(game)
@@ -136,9 +138,9 @@ def get_url_att_game(url, date_str, is_live=False):
                     continue
                 addOrAttGamesInfo(game, is_live)
                 #live
-        else: print(f"Don't have game_info at {date_str}")
+        else: logger.warning(f"Don't have game_info at {date_str}")
     except requests.RequestException as e:
-        print(f"Error accessing {url}: {e}")
+        logger.error(f"Error accessing {url}: {e}")
 
 def games_finished_info(last_days=7):
     start_day = datetime.strptime(get_oldest_date(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -149,7 +151,7 @@ def games_finished_info(last_days=7):
     while current_day <= today:
         date_str = current_day.strftime("%Y-%m-%d")
         url = f"{API_FINISHED_GAME_PART}{date_str}"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         get_url_att_game(url, date_str)
         current_day += timedelta(days=1)
 
@@ -160,7 +162,7 @@ def games_upcoming_info():
     while current_day < end_day:
         date_str = current_day.strftime("%Y-%m-%d")
         url = f"{API_UPCOMING_GAME_PART}{date_str}"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         get_url_att_game(url, date_str)
         current_day += timedelta(days=1)
 
@@ -169,7 +171,7 @@ def games_live_info(count=20):
     date_str = today.strftime("%Y-%m-%d")
     url = f"{API_LIVE_GAME_PART}{date_str}"
     for i in range(count):
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         get_url_att_game(url, date_str, True)
         if i <= count:
             time.sleep(90)
@@ -180,23 +182,29 @@ def games_stage_round():
     ).all()
     for game in games:
         url = f"{API_GAME_STATS_PART}{game.slug}?scope=show-match&stream_language=en&with=games,teams,tournament_deep,stage,ai_predictions"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
             data = response.json()
             if game.status == 'finished':
                 gs_score = safe_get(data, "games")
-                games_score = []
                 if gs_score:
+                    games_score = []
                     for g_score in gs_score:
+                        team_winner_slug = db.session.query(TeamsInfo).filter(
+                            TeamsInfo.team_id == (safe_get(g_score, "winner_team_clan", "team", "id"))
+                        ).first()
+                        if not team_winner_slug:
+                            logger.warning(f"team_id not exists in db {safe_get(g_score, 'winner_team_clan', 'team', 'id')}")
+                            continue
                         game_score = {
                             "map_name": (safe_get(g_score, "map_name")),
                             "order": (safe_get(g_score, "number")),
                             "rounds_count": (safe_get(g_score, "rounds_count")),
                             "winner_score": (safe_get(g_score, "winner_clan_score")),
                             "loser_score": (safe_get(g_score, "loser_clan_score")),
-                            "winner_team": (safe_get(g_score, "winner_team_clan", "team", "slug")),
+                            "winner_team": team_winner_slug.slug,
                         }
                         games_score.append(game_score)
                     game.games_score = games_score
@@ -210,7 +218,7 @@ def games_stage_round():
                 game.stage_round = stage_round
                 db.session.commit()
         except requests.RequestException as e:
-            print(f"Error accessing {url}: {e}")
+            logger.error(f"Error accessing {url}: {e}")
 
 def addOrAttTeamsInfoValve(t):
     team = TeamsInfo.query.filter_by(slug=safe_get(t, "team", "slug")).first()
@@ -239,7 +247,7 @@ def team_info_valve_ranking():
     total_pages = math.ceil(total_items / 30)
     for page in range(1, total_pages):
         url = f"{API_VALVE_RANKINK_PART}&page={page}&per_page=30"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
@@ -248,7 +256,7 @@ def team_info_valve_ranking():
             for team in teams:
                 addOrAttTeamsInfoValve(team)
         except requests.RequestException as e:
-            print(f"Error accessing {url}: {e}")
+            logger.error(f"Error accessing {url}: {e}")
 
 def addOrAttTeamsInfo(t):
     team = TeamsInfo.query.filter_by(slug=safe_get(t, "slug")).first()
@@ -272,7 +280,7 @@ def team_info():
     max_range = get_range(API_TEAM_PART, 30)
     for offset in range(0, max_range, 30):
         url = f"{API_TEAM_PART}&page[offset]={offset}&page[limit]=30"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
@@ -281,7 +289,7 @@ def team_info():
             for team in teams:
                 addOrAttTeamsInfo(team)
         except requests.RequestException as e:
-            print(f"Error accessing {url}: {e}")
+            logger.error(f"Error accessing {url}: {e}")
 
 def addOrAttPlayerStats(p, period):
     if (period == 'last_month'): playerDb = PlayerStatsLastMonth 
@@ -401,12 +409,12 @@ def addOrAttPlayerStats(p, period):
 def player_info_period(period=31, db_table='last_month'):
     today = datetime.now(timezone.utc) + timedelta(days=1)
     end_day = datetime.now(timezone.utc) - timedelta(days=period)
-    date_prop = f"&filter[game_begin_at][gt]={end_day.strftime("%Y-%m-%d")}&filter[game_begin_at][lt]={today.strftime("%Y-%m-%d")}"
+    date_prop = f"&filter[game_begin_at][gt]={end_day.strftime('%Y-%m-%d')}&filter[game_begin_at][lt]={today.strftime('%Y-%m-%d')}"
     max_range = get_range(f"{API_PLAYER_INFO_PART}{date_prop}&with=player", 50)
     for offset in range(0, max_range, 50):
         page_prop = f"&with=player&page[offset]={offset}&page[limit]=50"
         url = f"{API_PLAYER_INFO_PART}{date_prop}{page_prop}"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
@@ -415,7 +423,7 @@ def player_info_period(period=31, db_table='last_month'):
             for player in players:
                 addOrAttPlayerStats(player, db_table)
         except requests.RequestException as e:
-            print(f"Error accessing {url}: {e}")
+            logger.error(f"Error accessing {url}: {e}")
 
 def addOrAttLeaguesInfo(l):
     league = LeaguesInfo.query.filter_by(slug=safe_get(l, "slug")).first()
@@ -445,7 +453,7 @@ def leagues_finished_info():
     for offset in range(0, max_range, 50):
         page_prop = f"&page[offset]={offset}&page[limit]=50"
         url = f"{API_FINISHED_LEAGUE_INFO_PART}{page_prop}"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
@@ -454,14 +462,14 @@ def leagues_finished_info():
             for league in leagues:
                 addOrAttLeaguesInfo(league)
         except requests.RequestException as e:
-            print(f"Error accessing {url}: {e}")
+            logger.error(f"Error accessing {url}: {e}")
 
 def leagues_current_upcoming_info():
     max_range = get_range(API_CURRENT_UPCOMING_LEAGUE_INFO_PART, 50)
     for offset in range(0, max_range, 50):
         page_prop = f"&page[offset]={offset}&page[limit]=50"
         url = f"{API_CURRENT_UPCOMING_LEAGUE_INFO_PART}{page_prop}"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
@@ -470,7 +478,7 @@ def leagues_current_upcoming_info():
             for league in leagues:
                 addOrAttLeaguesInfo(league)
         except requests.RequestException as e:
-            print(f"Error accessing {url}: {e}")
+            logger.error(f"Error accessing {url}: {e}")
     
 def playerStatsData(p, map_stats):
     playerData = {
@@ -535,7 +543,7 @@ def games_players_stats():
     )
     for game in games:
         url = f"{API_GAME_STATS_PART}{game.slug}/players_stats"
-        print(f"Accessing: {url}")
+        logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
             response.raise_for_status()
@@ -561,8 +569,8 @@ def games_players_stats():
                 maps_p = []
                 for m in game.maps:
                     if not safe_get(m, "steam_game_id"): continue
-                    map_url = f"{API_MAP_GAME_STATS_PART}{safe_get(m, "steam_game_id")}/players_stats"
-                    print(f"Accessing: {map_url}")
+                    map_url = f"{API_MAP_GAME_STATS_PART}{safe_get(m, 'steam_game_id')}/players_stats"
+                    logger.info(f"Accessing: {map_url}")
                     map_obj = {
                         "map_name": safe_get(m, "map_name"),
                         "steam_game_id": safe_get(m, "steam_game_id"),
@@ -576,12 +584,12 @@ def games_players_stats():
                         for map_p in map_players_stats:
                             map_obj["players_stats"].append(playerStatsData(map_p, True))
                     except requests.RequestException as e:
-                      print(f"Error accessing {url}: {e}")
+                      logger.error(f"Error accessing {url}: {e}")
                     maps_p.append(map_obj)
                 game.maps_players_stats = maps_p
                 db.session.commit()
         except requests.RequestException as e:
-            print(f"Error accessing {url}: {e}")
+            logger.error(f"Error accessing {url}: {e}")
 
 def games_players_short_stats():
     games = db.session.query(GamesInfo).filter(
@@ -598,7 +606,7 @@ def games_players_short_stats():
     for game in games:
         try:
             url_short = f"{API_GAME_STATS_PART}{game.slug}/short_players_stats/"
-            print(f"Accessing: {url_short}")
+            logger.info(f"Accessing: {url_short}")
             response = requests.get(url_short, timeout=60)
             response.raise_for_status()
             short_maps_stats = safe_get(response.json())
@@ -613,12 +621,12 @@ def games_players_short_stats():
                         continue
                     try: 
                         url_maps = f"{API_GAME_STATS_PART}{game.slug}/games/"
-                        print(f"Accessing: {url_maps}")
+                        logger.info(f"Accessing: {url_maps}")
                         response_m = requests.get(url_maps + map_name, timeout=60)
                         response_m.raise_for_status()
                         map_stats = safe_get(response_m.json())
                     except requests.RequestException as e:
-                        print(f"Error accessing {url_maps}: {e}")
+                        logger.error(f"Error accessing {url_maps}: {e}")
                     p_map = {
                         "map_name": map_name,
                         "steam_game_id": safe_get(map_stats, 'id'),
@@ -640,7 +648,7 @@ def games_players_short_stats():
                 game.short_maps_players_stats = s_maps
                 db.session.commit()
         except requests.RequestException as e:
-            print(f"Error accessing {url_short}: {e}")
+            logger.error(f"Error accessing {url_short}: {e}")
 
 def mapsGameSideStatsData(mapsGameSideStats):
     maps_game_side_stats = []
@@ -725,7 +733,7 @@ def games_map_side_stats():
     for game in games:
         try:
             url_maps = f"{API_GAME_TEAM_ROUNDS_PART}{game.game_id}&with=winner_team_clan,loser_team_clan,game_side_results,game_rounds"
-            print(f"Accessing: {url_maps}")
+            logger.info(f"Accessing: {url_maps}")
             response = requests.get(url_maps, timeout=60)
             response.raise_for_status()
             maps_game_side_stats = safe_get(response.json())
@@ -733,7 +741,7 @@ def games_map_side_stats():
                 game.game_side_stats = mapsGameSideStatsData(safe_get(maps_game_side_stats, 'results'))
                 db.session.commit()
         except requests.RequestException as e:
-            print(f"Error accessing {url_maps}: {e}")
+            logger.error(f"Error accessing {url_maps}: {e}")
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -744,9 +752,9 @@ def send_telegram(msg):
     try:
         response = requests.post(url, data=payload)
         if response.status_code != 200:
-            print("Erro ao enviar mensagem para o Telegram:", response.text)
+            logger.error(f"Error sending message to Telegram: {response.text}")
     except Exception as e:
-        print("Erro ao tentar enviar mensagem para o Telegram:", e)
+        logger.error(f"Error trying to send message to Telegram: {e}")
 
 FUNCTIONS = [
     ("leagues_finished_info", leagues_finished_info),
@@ -757,6 +765,9 @@ FUNCTIONS = [
     ("player_info_period_92", lambda: player_info_period(92, 'last_3_months')),
     ("player_info_period_183", lambda: player_info_period(183, 'last_6_months')),
     ("player_info_period_365", lambda: player_info_period(365, 'last_12_months')),
+]
+
+FUNCTIONS_GAMES = [
     ("delete_games", delete_games),
     ("games_finished_info", games_finished_info),
     ("games_upcoming_info", games_upcoming_info),
@@ -772,36 +783,35 @@ FUNCTIONS_LIVE = [
     ("games_live_info", lambda: games_live_info(2)),
 ]
 
-def run_auto_db_loop():
+def run_auto_db_loop(list_functions, type_name):
     with app.app_context():
-        active_functions = FUNCTIONS.copy()
-        while True:
-            failed_functions = []
-            success_count = 0
-            for name, func in active_functions:
-                try:
-                    func()
-                    success_count += 1
-                except Exception as e:
-                    tb = traceback.format_exc()
-                    error_msg = (
-                        f"⚠️ Erro na função '{name}':\n"
-                        f"{str(e)}\n\n"
-                        f"📌 Traceback completo:\n{tb}"
-                    )
-                    print(error_msg)
-                    send_telegram(error_msg)
-                    failed_functions.append(name)
-            active_functions = [
-                f for f in active_functions if f[0] not in failed_functions
-            ]
-            summary = (
-                f"🔄 Loop completo finalizado.\n"
-                f"✔️ OK: {success_count}\n"
-                f"❌ Removidas: {failed_functions}"
-            )
-            send_telegram(summary)
-            time.sleep(30*60)
+        active_functions = list_functions.copy()
+        failed_functions = []
+        success_count = 0
+        for name, func in active_functions:
+            try:
+                func()
+                success_count += 1
+            except Exception as e:
+                tb = traceback.format_exc()
+                error_msg = (
+                    f"⚠️ Error function '{name}':\n"
+                    f"{str(e)}\n\n"
+                    f"📌 Traceback:\n{tb}"
+                )
+                logger.error(error_msg)
+                send_telegram(error_msg)
+                failed_functions.append(name)
+        active_functions = [
+            f for f in active_functions if f[0] not in failed_functions
+        ]
+        summary = (
+            f"{type_name} - "
+            f"OK: {success_count}\n"
+            f"removed: {failed_functions}"
+        )
+        logger.info(summary)
+        send_telegram(summary)
 
 def run_auto_live_loop():
     with app.app_context():
@@ -827,26 +837,34 @@ def run_auto_live_loop():
                     except Exception as e:
                         tb = traceback.format_exc()
                         error_msg = (
-                            f"⚠️ Erro na função AO VIVO '{name}':\n"
+                            f"⚠️ Error live function '{name}':\n"
                             f"{str(e)}\n\n"
-                            f"📌 Traceback completo:\n{tb}"
+                            f"📌 Traceback:\n{tb}"
                         )
-                        print(error_msg)
+                        logger.error(error_msg)
                         send_telegram(error_msg)
                         failed_functions.append(name)
                     active_functions = [
                         f for f in active_functions if f[0] not in failed_functions
                     ]
                     summary = (
-                        f"🔥 Loop AO VIVO finalizado.\n"
-                        f"✔️ OK: {success_count}\n"
-                        f"❌ Removidas: {failed_functions}"
+                        f"LIVE - removed: {failed_functions}"
                     )
-                    send_telegram(summary)
-            time.sleep(5)
+                    if failed_functions:
+                        logger.info(summary)
+                        send_telegram(summary)
+            time.sleep(60)
 
+def run_db_geral_games():
+    count = 0
+    while True:
+        if (count % 12 == 0):
+            run_auto_db_loop(FUNCTIONS, 'Geral')
+        run_auto_db_loop(FUNCTIONS_GAMES, 'Games')
+        time.sleep(60*60)
+        count += 1
 
-t1 = threading.Thread(target=run_auto_db_loop, daemon=True)
+t1 = threading.Thread(target=run_db_geral_games, daemon=True)
 t2 = threading.Thread(target=run_auto_live_loop, daemon=True)
 
 t1.start()

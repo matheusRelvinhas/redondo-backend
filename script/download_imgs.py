@@ -3,11 +3,14 @@ import os
 import requests
 from time import sleep
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from app import app
-from models import db, TeamsInfo, LeaguesInfo, PlayerStats12Months, PlayerStats6Months, PlayerStats3Months, PlayerStatsLastMonth
+from models import TeamsInfo, LeaguesInfo, PlayerStats12Months, PlayerStats6Months, PlayerStats3Months, PlayerStatsLastMonth
+from loguru import logger
+from app import create_app
 
 current_script_dir = os.path.dirname(os.path.abspath(__file__))
 backend_base_dir = os.path.dirname(os.path.dirname(current_script_dir))
+
+app = create_app()
 
 BASE_IMG_PATH = os.path.join(
     backend_base_dir, 
@@ -32,9 +35,9 @@ def download_img(url: str, path_img: str):
         resp.raise_for_status()
         with open(path_img, 'wb') as f:
             f.write(resp.content)
-        print(f"✅ Donwload: {path_img}")
+        logger.success(f"Donwload: {path_img}")
     except Exception as e:
-        print(f"❌ Fail download - {url}: {e}")
+        logger.error(f"Fail download - {url}: {e}")
 
 def donwload_imgs(model, type_img: str):
     data = model.query.all()
@@ -47,7 +50,7 @@ def donwload_imgs(model, type_img: str):
         filename = f"{slug}.{ext}"
         path_img = os.path.join(DIRS[type_img], filename)
         if os.path.exists(path_img):
-            print(f"🔁 Already exists ({type_img}): {filename}")
+            logger.info(f"Already exists ({type_img}): {filename}")
             os.remove(path_img)
         download_img(url, path_img)
         sleep(0.2)

@@ -2,10 +2,8 @@ import threading
 import time
 import traceback
 from flask import Blueprint, request, current_app
-from models import db, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, AiAnalytics
-from routes.api.player_stats import player_info
+from models import db, AiAnalytics, GamesInfo, TeamsInfo
 from routes.api.teams_stats import get_team_info, get_team_players_info, get_team_games_info, get_team_maps_info, get_team_leagues_info
-from routes.api.games_stats import game_info_stat
 from utils import responseApi, token_service_required, get_access_and_user
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -237,6 +235,221 @@ def format_recent_games(games, team_slug=None, for_llm=False):
     return (f"<ul>{''.join(items)}</ul><p>Últimas 5 partidas: <strong>{wins}V - {len(items)-wins}D</strong> "
             f"(Desempenho: <strong class='{get_performance_class(wins/len(items)*100 if items else 0)}'>{round(wins/len(items)*100)}%</strong>)</p>")
 
+def extract_map_categories_6m(maps_dict):
+    veto_fixo = []
+    raramente = []
+    bem_estabelecidos = []
+    for map_name, stats in maps_dict.items():
+        total = stats['total']
+        if total == 0:
+            veto_fixo.append(map_name)
+        elif 1 <= total <= 2:
+            raramente.append((map_name, total))
+        else:
+            bem_estabelecidos.append(map_name)
+    return {
+        'veto_fixo': veto_fixo,
+        'raramente': raramente,
+        'bem_estabelecidos': bem_estabelecidos
+    }
+
+def extract_maps_data_6m(games, team_slug):
+    if not games:
+        return {}
+    maps_info = get_team_maps_info(games)
+    if not maps_info:
+        return {}
+    now = time.time()
+    six_months_ago = now - (182 * 24 * 60 * 60)
+    map_stats = {map_name: {'wins': 0, 'losses': 0} for map_name in CS2_MAPS.values()}
+    for map_data in maps_info:
+        map_code = map_data.get('map_name')
+        if map_code not in CS2_MAPS:
+            continue
+        if map_data.get('team1_slug') != team_slug and map_data.get('team2_slug') != team_slug:
+            continue
+        timestamp = map_data.get('start_timestamp', 0)
+        if timestamp < six_months_ago:
+            continue 
+        map_name = CS2_MAPS[map_code]
+        won = map_data.get('winner_team') == team_slug
+        if won:
+            map_stats[map_name]['wins'] += 1
+        else:
+            map_stats[map_name]['losses'] += 1
+    result = {}
+    for map_name, stats in map_stats.items():
+        total = stats['wins'] + stats['losses']
+        wr = round(stats['wins'] / total * 100) if total > 0 else 0
+        result[map_name] = {
+            'wins': stats['wins'],
+            'losses': stats['losses'],
+            'total': total,
+            'winrate': wr
+        }
+    return result
+
+def get_game_ai_analytics(game_slug):
+    game = db.session.query(GamesInfo).filter(GamesInfo.slug == game_slug).first()
+    if not game or (game.status != 'upcoming' and game.status != 'current'):
+        return None
+    team1 = db.session.query(TeamsInfo).filter(TeamsInfo.team_id == game.team1_id).first()
+    team2 = db.session.query(TeamsInfo).filter(TeamsInfo.team_id == game.team2_id).first()
+    if not team1 or not team2:
+        return None
+    team1_slug = team1.slug
+    team2_slug = team2.slug
+    team1_data = get_team_ai_analytics(team1_slug)
+    team2_data = get_team_ai_analytics(team2_slug)
+    if not team1_data or not team2_data:
+        return None
+    team1_maps = extract_maps_data_6m(team1_data.get("all_games", []), team1_slug)
+    team2_maps = extract_maps_data_6m(team2_data.get("all_games", []), team2_slug)
+    map_comparison = {}
+    for map_name in CS2_MAPS.values():
+        t1_data = team1_maps.get(map_name, {'wins': 0, 'losses': 0, 'total': 0, 'winrate': 0})
+        t2_data = team2_maps.get(map_name, {'wins': 0, 'losses': 0, 'total': 0, 'winrate': 0})
+        map_comparison[map_name] = {
+            'team1': t1_data,
+            'team2': t2_data,
+            'advantage': 'team1' if t1_data['winrate'] > t2_data['winrate'] else ('team2' if t2_data['winrate'] > t1_data['winrate'] else 'neutral'),
+            'winrate_diff': abs(t1_data['winrate'] - t2_data['winrate'])
+        }
+    team1_perf_6m = team1_data.get('games_info', {}).get('6_months', {})
+    team2_perf_6m = team2_data.get('games_info', {}).get('6_months', {})
+    team1_stats_6m = team1_data.get('aggregated_stats', {}).get('6_months', {})
+    team2_stats_6m = team2_data.get('aggregated_stats', {}).get('6_months', {})
+    team1_recent = team1_data.get('recent_games', [])
+    team2_recent = team2_data.get('recent_games', [])
+    return {
+        'game_info': {
+            'slug': game_slug,
+            'status': game.status,
+            'bo_type': game.bo_type,
+            'tier': game.tier,
+            'start_date': game.start_date,
+        },
+        'team1': {
+            'slug': team1_slug,
+            'name': team1.team_name,
+            'rank': team1.rank,
+            'country': team1.country_code,
+            'region': team1.region_code,
+            'maps': team1_maps,
+            'performance_6m': team1_perf_6m,
+            'stats_6m': team1_stats_6m,
+            'recent_games': team1_recent
+        },
+        'team2': {
+            'slug': team2_slug,
+            'name': team2.team_name,
+            'rank': team2.rank,
+            'country': team2.country_code,
+            'region': team2.region_code,
+            'maps': team2_maps,
+            'performance_6m': team2_perf_6m,
+            'stats_6m': team2_stats_6m,
+            'recent_games': team2_recent
+        },
+        'map_comparison': map_comparison
+    }
+
+def generate_text_analysis(response, team1, team2, map_comparison):
+    team1_analyzed_maps = [(name, stats) for name, stats in team1['maps'].items() if stats['total'] >= 5]
+    team2_analyzed_maps = [(name, stats) for name, stats in team2['maps'].items() if stats['total'] >= 5]
+    team1_best_map = max(team1_analyzed_maps, key=lambda x: x[1]['winrate']) if team1_analyzed_maps else None
+    team2_best_map = max(team2_analyzed_maps, key=lambda x: x[1]['winrate']) if team2_analyzed_maps else None
+    team1_categories = extract_map_categories_6m(team1['maps'])
+    team2_categories = extract_map_categories_6m(team2['maps'])
+    result_parts = []
+    result_parts.append(response.content.strip())
+    result_parts.append("\n<p><strong>Análise de Jogos (últimos 6 meses):</strong></p>")
+    team1_perf_html = format_performance({'6_months': team1['performance_6m']}, only_6m=True)
+    team1_recent_html = format_recent_games(team1['recent_games'], team1['slug'], for_llm=False)
+    team2_perf_html = format_performance({'6_months': team2['performance_6m']}, only_6m=True)
+    team2_recent_html = format_recent_games(team2['recent_games'], team2['slug'], for_llm=False)
+    perf_items = []
+    perf_items.append(f"<li><strong>{team1['name']}</strong><br>{team1_perf_html}<br>{team1_recent_html}</li>")
+    perf_items.append(f"<li><strong>{team2['name']}</strong><br>{team2_perf_html}<br>{team2_recent_html}</li>")
+    result_parts.append(f"<ul>{''.join(perf_items)}</ul>")
+    result_parts.append("\n\n<p><strong>Análise de Mapas (últimos 6 meses):</strong></p>")
+    maps_info = []
+    team1_info_text = f"<strong>{team1['name']}</strong>"
+    if team1_best_map:
+        team1_info_text += f" - Melhor mapa: <strong>{team1_best_map[0]}</strong> ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} partidas)"
+    team1_info_text += "<br>"
+    if team1_categories['veto_fixo']:
+        team1_info_text += f"<em>Veto fixo:</em> {', '.join(team1_categories['veto_fixo'])}<br>"
+    if team1_categories['raramente']:
+        rare_str = ', '.join([f"{name} ({total})" for name, total in team1_categories['raramente']])
+        team1_info_text += f"<em>Raramente:</em> {rare_str}"
+    maps_info.append(f"<li>{team1_info_text}</li>")
+    team2_info_text = f"<strong>{team2['name']}</strong>"
+    if team2_best_map:
+        team2_info_text += f" - Melhor mapa: <strong>{team2_best_map[0]}</strong> ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} partidas)"
+    team2_info_text += "<br>"
+    if team2_categories['veto_fixo']:
+        team2_info_text += f"<em>Veto fixo:</em> {', '.join(team2_categories['veto_fixo'])}<br>"
+    if team2_categories['raramente']:
+        rare_str = ', '.join([f"{name} ({total})" for name, total in team2_categories['raramente']])
+        team2_info_text += f"<em>Raramente:</em> {rare_str}"
+    maps_info.append(f"<li>{team2_info_text}</li>")
+    result_parts.append(f"<ul>{''.join(maps_info)}</ul>")
+    result_parts.append("\n<p><strong>Mapas Críticos (análise comparativa):</strong></p>")
+    critical_analysis = []
+    for map_name, comparison in map_comparison.items():
+        t1 = comparison['team1']
+        t2 = comparison['team2']
+        if t1['total'] == 0 or t2['total'] == 0:
+            continue
+        t1_wr = t1['winrate']
+        t2_wr = t2['winrate']
+        diff = abs(t1_wr - t2_wr)
+        confidence_factor = min(1.0, (t1['total'] + t2['total']) / 20.0)
+        criticality = diff * confidence_factor
+        advantage_team = team1['name'] if t1_wr > t2_wr else team2['name']
+        critical_analysis.append({
+            'map': map_name,
+            'diff': diff,
+            'criticality': criticality,
+            'advantage': advantage_team,
+            't1': t1,
+            't2': t2
+        })
+    critical_dict = {c['map']: c for c in critical_analysis}
+    critical_items = []
+    for map_name in CS2_MAPS.values():
+        if map_name in critical_dict:
+            critical = critical_dict[map_name]
+            diff = critical['diff']
+            if 1 <= diff <= 15:
+                favoritismo = "baixo favoritismo"
+                fav_class = "text-danger"
+            elif 16 <= diff <= 30:
+                favoritismo = "médio favoritismo"
+                fav_class = "text-tr"
+            else:
+                favoritismo = "alto favoritismo"
+                fav_class = "text-success"
+            critical_items.append(f"<li><strong>{critical['map']}</strong>: {critical['advantage']} favorito (<strong class='{fav_class}'>{favoritismo}</strong>)</li>")
+    result_parts.append(f"<ul>{''.join(critical_items)}</ul>" if critical_items else "<p>Todos os mapas têm distribuição equilibrada.</p>")
+    result_parts.append("\n<p><strong>Desempenho em Mapas:</strong></p>")
+    map_items = []
+    for map_name in CS2_MAPS.values():
+        if map_name not in map_comparison:
+            continue
+        comparison = map_comparison[map_name]
+        t1 = comparison['team1']
+        t2 = comparison['team2']
+        if t1['total'] == 0 or t2['total'] == 0:
+            continue
+        t1_wr_class = get_performance_class(t1['winrate'])
+        t2_wr_class = get_performance_class(t2['winrate'])
+        map_items.append(f"<li><strong>{map_name}</strong>: {team1['name']} <strong class='{t1_wr_class}'>{t1['winrate']}%</strong> ({t1['wins']}V-{t1['losses']}D) vs {team2['name']} <strong class='{t2_wr_class}'>{t2['winrate']}%</strong> ({t2['wins']}V-{t2['losses']}D)</li>")
+    result_parts.append(f"<ul>{''.join(map_items)}</ul>" if map_items else "<p>Sem mapas em comum.</p>")
+    result = "".join(result_parts)
+    return result
+
 def generate_team_analysis(app, analysis_id: int, team_slug: str):
     with app.app_context():
         try:
@@ -260,7 +473,7 @@ RULES: Brazilian Portuguese only, valid HTML tags only (<p>,<strong>,<br>), max 
 Use <strong> tags to highlight: team name, key statistics, relevant performance data, and important achievements.
 Write as an expert would: discuss team positioning, current form, performance trends, and map strengths naturally.
 DATA: Team: {team} | Stats: {stats} | Performance: {performance} | Top Maps: {maps} | Active Leagues: {leagues} | Recent Form: {recent}""")
-            chain = prompt | ChatOpenAI(model="gpt-5-nano", api_key=current_app.config["OPENAI_API_KEY"])
+            chain = prompt | ChatOpenAI(model="gpt-4o-mini", api_key=current_app.config["OPENAI_API_KEY"])
             team_name = team_info.get("name") or team_info.get("team_name") or ""
             response = chain.invoke({
                 "team": format_intro(team_name, team_info.get("rank", ""), team_info.get("country_code", ""), team_info.get("region_code", "")),
@@ -281,6 +494,58 @@ DATA: Team: {team} | Stats: {stats} | Performance: {performance} | Top Maps: {ma
                 db.session.commit()
         except Exception as e:
             logger.error(f"team analysis error: {e}\n{traceback.format_exc()}")
+
+def generate_game_analysis(app, analysis_id: int, game_slug: str):
+    with app.app_context():
+        try:
+            data = get_game_ai_analytics(game_slug)
+            if not data:
+                game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
+                if game_analytic:
+                    game_analytic.pt_text = "Jogo não encontrado ou não é pré-jogo (status != upcoming)."
+                    game_analytic.status = 'success'
+                    db.session.commit()
+                return
+            team1 = data['team1']
+            team2 = data['team2']
+            game_info = data['game_info']
+            map_comparison = data['map_comparison']
+            bo_type = game_info.get('bo_type', 3)
+            prompt = PromptTemplate.from_template("""
+You are a professional CS2 esports analyst writing a pre-game prediction analysis.
+Write organic, flowing text comparing both teams and predicting the match outcome. Focus on last 6 months data.
+RULES: Brazilian Portuguese only, use HTML tags (<p>, <strong>, <br>), max ~250 words, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
+Use <strong> tags to highlight: team names, statistics, key differences. Wrap entire response in <p> tags.
+Write as an expert would: discuss team comparison, map pool differences, recent form, and likely outcome.
+DATA: 
+Team1: {team1_info} | Stats: {team1_stats} | Performance: {team1_perf} | Recent games: {team_1_recent}
+Team2: {team2_info} | Stats: {team2_stats} | Performance: {team2_perf} | Recent games: {team_2_recent}
+Match: BO{bo_type}""")
+            chain = prompt | ChatOpenAI(model="gpt-4o-mini", api_key=current_app.config["OPENAI_API_KEY"])
+            response = chain.invoke({
+                "team1_info": format_intro(team1['name'], team1['rank'], team1['country'], team1.get('region')),
+                "team1_stats": format_stats(team1['stats_6m'], is_team=False) if team1['stats_6m'] else "N/A",
+                "team1_perf": format_performance({'6_months': team1['performance_6m']}, only_6m=True),
+                "team_1_recent": format_recent_games(team1['recent_games'], team1['slug'], for_llm=True),
+                "team2_info": format_intro(team2['name'], team2['rank'], team2['country'], team2.get('region')),
+                "team2_stats": format_stats(team2['stats_6m'], is_team=False) if team2['stats_6m'] else "N/A",
+                "team2_perf": format_performance({'6_months': team2['performance_6m']}, only_6m=True),
+                "team_2_recent": format_recent_games(team2['recent_games'], team2['slug'], for_llm=True),
+                "bo_type": bo_type
+            })
+            result = generate_text_analysis(response, team1, team2, map_comparison)
+            game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
+            if game_analytic:
+                game_analytic.pt_text = result
+                game_analytic.status = 'success'
+                db.session.commit()
+                logger.info(f"Game analysis generated successfully: {game_slug}")
+        except Exception as e:
+            logger.error(f"game analysis error: {e}\n{traceback.format_exc()}")
+            game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
+            if game_analytic:
+                game_analytic.status = 'error'
+                db.session.commit()
 
 @bp.route('/team', methods=["GET"])
 @token_service_required
@@ -317,4 +582,39 @@ def ai_analytics_team():
         return responseApi({"ai_analytics_team": result, "status": team_analytic.status}, 200)
     except Exception as e:
         logger.error(f"team endpoint error: {e}\n{traceback.format_exc()}")
+        return responseApi({"error": "internal_error"}, 500)
+    
+@bp.route('/game', methods=["GET"])
+@token_service_required
+def ai_analytics_game():
+    try:
+        get_access_and_user()
+        slug = request.args.get('slug')
+        if not slug:
+            return responseApi({"error": "missing_arguments"}, 400)
+        delete_old_pending_analytics(slug, 'game')
+        cache_key = f"ai_analytics_game::{slug}"
+        cached = current_app.cache.get(cache_key)
+        if cached:
+            return responseApi(cached, 200)
+        game_analytic = db.session.query(AiAnalytics).filter(
+            AiAnalytics.slug == slug, AiAnalytics.target_type == 'game'
+        ).first()
+        if game_analytic and game_analytic.status == 'pending':
+            return responseApi({"ai_analytics_game": None, "status": "pending"}, 200)
+        if not game_analytic:
+            if request.args.get('not_ai_return') == 'ok':
+                return responseApi({"not_ai_return": True}, 200)
+            new = AiAnalytics(slug=slug, target_type='game', status='pending')
+            db.session.add(new)
+            db.session.commit()
+            threading.Thread(target=generate_game_analysis, args=(current_app._get_current_object(), new.id, slug)).start()
+            return responseApi({"ai_analytics_game": None, "status": "pending"}, 200)
+        result = None
+        if game_analytic.status == 'success':
+            result = game_analytic.pt_text
+            current_app.cache.set(cache_key, {"ai_analytics_game": result, "status": "success"}, timeout=86400)
+        return responseApi({"ai_analytics_game": result, "status": game_analytic.status}, 200)
+    except Exception as e:
+        logger.error(f"game endpoint error: {e}\n{traceback.format_exc()}")
         return responseApi({"error": "internal_error"}, 500)

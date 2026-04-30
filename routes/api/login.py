@@ -9,6 +9,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User
 from utils import responseApi, get_access_and_user, token_service_required
 from email.mime.text import MIMEText
+from loguru import logger
 
 def validate_email_function(email: str) -> bool:
     try:
@@ -30,10 +31,10 @@ def generate_jwt_token(user_id):
     return encode
 
 def send_email_recovery(to_email, subject, html):
-    smtp_server = "smtp.gmail.com"
+    smtp_server = "smtp.hostinger.com"
     smtp_port = 587
-    sender_email = os.getenv("GOOGLE_SEND_EMAIL")
-    sender_password = os.getenv("GOOGLE_SEND_PASSWORD")
+    sender_email = os.getenv("SEND_EMAIL")
+    sender_password = os.getenv("SEND_PASSWORD")
     msg = MIMEText(html, "html")
     msg["Subject"] = subject
     msg["From"] = sender_email
@@ -161,12 +162,12 @@ def recover_password():
         """
         send_email_recovery(
             email,
-            "Recuperar senha - REDONDO.GG",
+            "Recuperar senha - REDONDO.FUN",
             html
         )
         return responseApi({"message": "email_sent"}, 200)
     except Exception as e:
-        print("Erro ao enviar e-mail:", e)
+        logger.error("Erro ao enviar e-mail:", e)
         return responseApi({"error": "error_recover_password"}, 400)
 
 @bp.route('/reset_password', methods=["GET"])
