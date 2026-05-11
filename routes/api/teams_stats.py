@@ -1,7 +1,7 @@
 import time
 from flask import Blueprint, request, current_app
 from models import TeamsInfo, PlayerStats12Months, PlayerStats6Months, PlayerStats3Months, PlayerStatsLastMonth, GamesInfo, LeaguesInfo, db
-from utils import responseApi, token_service_required
+from utils import responseApi, token_service_required, cache_return
 from sqlalchemy import String, cast, func
 
 bp = Blueprint('teams_stats', __name__, url_prefix='/api/teams_stats')
@@ -116,13 +116,9 @@ def get_team_leagues_info(slug):
 
 @bp.route('', methods=["GET"])
 @token_service_required
+@cache_return(timeout=20*60)
 def get_teams():
     region_code = request.args.get('region_code')
-    cache_key = f"stats_teams::{region_code or 'all'}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
-        return responseApi(cached, 200)
     if not region_code:
         return responseApi({"error": "missing_arguments"}, 400)
     subquery = (
@@ -144,20 +140,15 @@ def get_teams():
         query = query.filter(TeamsInfo.region_code == region_code)
     teams = query.all()
     result = {"teams": [team.to_dict() for team in teams]}
-    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
 
 @bp.route('/team', methods=["GET"])
 @token_service_required
+@cache_return(timeout=20*60)
 def team_info():
     slug = request.args.get('slug')
     if not slug:
         return responseApi({"error": "missing_arguments"}, 400)
-    cache_key = f"stats_teams/team::{slug}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
-        return responseApi(cached, 200)
     games_info = get_team_games_info(slug)
     team = get_team_info(slug)
     players_data = get_team_players_info(team.team_id)
@@ -169,5 +160,4 @@ def team_info():
         "maps": get_team_maps_info(games_info["games"]),
         "leagues": leagues_list
     }
-    current_app.cache.set(cache_key, result, timeout=60 *20)
     return responseApi(result, 200)

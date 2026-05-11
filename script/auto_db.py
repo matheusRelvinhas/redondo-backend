@@ -84,7 +84,6 @@ def delete_games():
     one_year_ago = int(time.time()) - (365 * 24 * 60 * 60)
     recent_games = db.session.query(GamesInfo).filter(
         GamesInfo.status == 'finished',
-        GamesInfo.parsed_status != 'done',
         GamesInfo.start_timestamp >= two_days_ago
     ).all()
     old_games = db.session.query(GamesInfo).filter(

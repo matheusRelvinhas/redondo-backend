@@ -159,7 +159,7 @@ def format_maps(games, team_slug, only_6m=False):
         if rare:
             veto_items.append(f"<li><strong>Raramente:</strong> {', '.join(rare)}</li>")
         if never:
-            veto_items.append(f"<li><strong>Veto fixo:</strong> {', '.join(never)}</li>")
+            veto_items.append(f"<li><strong>Veto fixo ou não jogado:</strong> {', '.join(never)}</li>")
         if veto_items:
             result.append(f"<ul>{''.join(veto_items)}</ul>")
         return "".join(result) if result else "Sem dados de mapas"
@@ -253,6 +253,134 @@ def extract_map_categories_6m(maps_dict):
         'bem_estabelecidos': bem_estabelecidos
     }
 
+def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
+    if for_llm:
+        team1_analyzed_maps = [(name, stats) for name, stats in team1['maps'].items() if stats['total'] >= 5]
+        team2_analyzed_maps = [(name, stats) for name, stats in team2['maps'].items() if stats['total'] >= 5]
+        team1_best_map = max(team1_analyzed_maps, key=lambda x: x[1]['winrate']) if team1_analyzed_maps else None
+        team2_best_map = max(team2_analyzed_maps, key=lambda x: x[1]['winrate']) if team2_analyzed_maps else None
+        analysis_text = f"\nAnálise de Mapas (últimos 6 meses): "
+        if team1_best_map:
+            analysis_text += f"{team1['name']} é forte em {team1_best_map[0]} ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} partidas). "
+        if team2_best_map:
+            analysis_text += f"{team2['name']} é forte em {team2_best_map[0]} ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} partidas). "
+        critical_analysis = []
+        for map_name, comparison in map_comparison.items():
+            t1 = comparison['team1']
+            t2 = comparison['team2']
+            if t1['total'] == 0 or t2['total'] == 0:
+                continue
+            t1_wr = t1['winrate']
+            t2_wr = t2['winrate']
+            diff = abs(t1_wr - t2_wr)
+            if diff >= 15:
+                advantage_team = team1['name'] if t1_wr > t2_wr else team2['name']
+                critical_analysis.append((map_name, advantage_team, diff))
+        if critical_analysis:
+            analysis_text += "Mapas críticos: "
+            for map_name, team, diff in critical_analysis[:3]:
+                if 1 <= diff <= 15:
+                    favoritismo = "baixo favoritismo"
+                elif 16 <= diff <= 30:
+                    favoritismo = "médio favoritismo"
+                elif diff > 30:
+                    favoritismo = "alto favoritismo"
+                else:
+                    favoritismo = "baixo favoritismo"
+                analysis_text += f"{map_name} favorece {team} ({favoritismo}). "
+        return analysis_text
+    else:
+        team1_analyzed_maps = [(name, stats) for name, stats in team1['maps'].items() if stats['total'] >= 5]
+        team2_analyzed_maps = [(name, stats) for name, stats in team2['maps'].items() if stats['total'] >= 5]
+        team1_best_map = max(team1_analyzed_maps, key=lambda x: x[1]['winrate']) if team1_analyzed_maps else None
+        team2_best_map = max(team2_analyzed_maps, key=lambda x: x[1]['winrate']) if team2_analyzed_maps else None
+        team1_categories = extract_map_categories_6m(team1['maps'])
+        team2_categories = extract_map_categories_6m(team2['maps'])
+        result_parts = []
+        result_parts.append("\n<p><strong>Análise de Mapas (últimos 6 meses):</strong></p>")
+        maps_info = []
+        team1_info_text = f"<strong>{team1['name']}</strong>"
+        if team1_best_map:
+            team1_info_text += f" - Melhor mapa: <strong>{team1_best_map[0]}</strong> ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} partidas)"
+        team1_info_text += "<br>"
+        if team1_categories['veto_fixo']:
+            team1_info_text += f"<em>Veto fixo ou não jogado:</em> {', '.join(team1_categories['veto_fixo'])}<br>"
+        if team1_categories['raramente']:
+            rare_str = ', '.join([f"{name} ({total})" for name, total in team1_categories['raramente']])
+            team1_info_text += f"<em>Raramente:</em> {rare_str}"
+        maps_info.append(f"<li>{team1_info_text}</li>")
+        team2_info_text = f"<strong>{team2['name']}</strong>"
+        if team2_best_map:
+            team2_info_text += f" - Melhor mapa: <strong>{team2_best_map[0]}</strong> ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} partidas)"
+        team2_info_text += "<br>"
+        if team2_categories['veto_fixo']:
+            team2_info_text += f"<em>Veto fixo ou não jogado:</em> {', '.join(team2_categories['veto_fixo'])}<br>"
+        if team2_categories['raramente']:
+            rare_str = ', '.join([f"{name} ({total})" for name, total in team2_categories['raramente']])
+            team2_info_text += f"<em>Raramente:</em> {rare_str}"
+        maps_info.append(f"<li>{team2_info_text}</li>")
+        result_parts.append(f"<ul>{''.join(maps_info)}</ul>")
+        result_parts.append("\n<p><strong>Mapas Críticos (análise comparativa):</strong></p>")
+        critical_analysis = []
+        for map_name, comparison in map_comparison.items():
+            t1 = comparison['team1']
+            t2 = comparison['team2']
+            if t1['total'] == 0 or t2['total'] == 0:
+                continue
+            t1_wr = t1['winrate']
+            t2_wr = t2['winrate']
+            diff = abs(t1_wr - t2_wr)
+            confidence_factor = min(1.0, (t1['total'] + t2['total']) / 20.0)
+            criticality = diff * confidence_factor
+            advantage_team = team1['name'] if t1_wr > t2_wr else team2['name']
+            critical_analysis.append({
+                'map': map_name,
+                'diff': diff,
+                'criticality': criticality,
+                'advantage': advantage_team,
+                't1': t1,
+                't2': t2
+            })
+        critical_dict = {c['map']: c for c in critical_analysis}
+        critical_items = []
+        for map_name in CS2_MAPS.values():
+            if map_name in critical_dict:
+                critical = critical_dict[map_name]
+                diff = critical['diff']
+                if 1 <= diff <= 15:
+                    favoritismo = "baixo favoritismo"
+                    fav_class = "text-danger"
+                elif 16 <= diff <= 30:
+                    favoritismo = "médio favoritismo"
+                    fav_class = "text-tr"
+                elif diff > 30:
+                    favoritismo = "alto favoritismo"
+                    fav_class = "text-success"
+                else:
+                    favoritismo = "baixo favoritismo"
+                    fav_class = "text-danger"
+                critical_items.append(f"<li><strong>{critical['map']}</strong>: {critical['advantage']} favorito (<strong class='{fav_class}'>{favoritismo}</strong>)</li>")
+        
+        result_parts.append(f"<ul>{''.join(critical_items)}</ul>" if critical_items else "<p>Todos os mapas têm distribuição equilibrada.</p>")
+        
+        result_parts.append("\n<p><strong>Desempenho em Mapas:</strong></p>")
+        map_items = []
+        for map_name in CS2_MAPS.values():
+            if map_name not in map_comparison:
+                continue
+            comparison = map_comparison[map_name]
+            t1 = comparison['team1']
+            t2 = comparison['team2']
+            if t1['total'] == 0 or t2['total'] == 0:
+                continue
+            t1_wr_class = get_performance_class(t1['winrate'])
+            t2_wr_class = get_performance_class(t2['winrate'])
+            map_items.append(f"<li><strong>{map_name}</strong>: {team1['name']} <strong class='{t1_wr_class}'>{t1['winrate']}%</strong> ({t1['wins']}V-{t1['losses']}D) vs {team2['name']} <strong class='{t2_wr_class}'>{t2['winrate']}%</strong> ({t2['wins']}V-{t2['losses']}D)</li>")
+        
+        result_parts.append(f"<ul>{''.join(map_items)}</ul>" if map_items else "<p>Sem mapas em comum.</p>")
+        
+        return "".join(result_parts)
+
 def extract_maps_data_6m(games, team_slug):
     if not games:
         return {}
@@ -299,6 +427,14 @@ def get_game_ai_analytics(game_slug):
         return None
     team1_slug = team1.slug
     team2_slug = team2.slug
+    last_games_team1 = db.session.query(GamesInfo).filter(
+        ((GamesInfo.team1_id == game.team1_id) | (GamesInfo.team2_id == game.team1_id))
+    ).limit(10).all()
+    last_games_team2 = db.session.query(GamesInfo).filter(
+        ((GamesInfo.team1_id == game.team2_id) | (GamesInfo.team2_id == game.team2_id))
+    ).limit(10).all()
+    if (len(last_games_team1) < 3 or len(last_games_team2) < 3):
+        return None
     team1_data = get_team_ai_analytics(team1_slug)
     team2_data = get_team_ai_analytics(team2_slug)
     if not team1_data or not team2_data:
@@ -355,12 +491,6 @@ def get_game_ai_analytics(game_slug):
     }
 
 def generate_text_analysis(response, team1, team2, map_comparison):
-    team1_analyzed_maps = [(name, stats) for name, stats in team1['maps'].items() if stats['total'] >= 5]
-    team2_analyzed_maps = [(name, stats) for name, stats in team2['maps'].items() if stats['total'] >= 5]
-    team1_best_map = max(team1_analyzed_maps, key=lambda x: x[1]['winrate']) if team1_analyzed_maps else None
-    team2_best_map = max(team2_analyzed_maps, key=lambda x: x[1]['winrate']) if team2_analyzed_maps else None
-    team1_categories = extract_map_categories_6m(team1['maps'])
-    team2_categories = extract_map_categories_6m(team2['maps'])
     result_parts = []
     result_parts.append(response.content.strip())
     result_parts.append("\n<p><strong>Análise de Jogos (últimos 6 meses):</strong></p>")
@@ -372,81 +502,8 @@ def generate_text_analysis(response, team1, team2, map_comparison):
     perf_items.append(f"<li><strong>{team1['name']}</strong><br>{team1_perf_html}<br>{team1_recent_html}</li>")
     perf_items.append(f"<li><strong>{team2['name']}</strong><br>{team2_perf_html}<br>{team2_recent_html}</li>")
     result_parts.append(f"<ul>{''.join(perf_items)}</ul>")
-    result_parts.append("\n\n<p><strong>Análise de Mapas (últimos 6 meses):</strong></p>")
-    maps_info = []
-    team1_info_text = f"<strong>{team1['name']}</strong>"
-    if team1_best_map:
-        team1_info_text += f" - Melhor mapa: <strong>{team1_best_map[0]}</strong> ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} partidas)"
-    team1_info_text += "<br>"
-    if team1_categories['veto_fixo']:
-        team1_info_text += f"<em>Veto fixo:</em> {', '.join(team1_categories['veto_fixo'])}<br>"
-    if team1_categories['raramente']:
-        rare_str = ', '.join([f"{name} ({total})" for name, total in team1_categories['raramente']])
-        team1_info_text += f"<em>Raramente:</em> {rare_str}"
-    maps_info.append(f"<li>{team1_info_text}</li>")
-    team2_info_text = f"<strong>{team2['name']}</strong>"
-    if team2_best_map:
-        team2_info_text += f" - Melhor mapa: <strong>{team2_best_map[0]}</strong> ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} partidas)"
-    team2_info_text += "<br>"
-    if team2_categories['veto_fixo']:
-        team2_info_text += f"<em>Veto fixo:</em> {', '.join(team2_categories['veto_fixo'])}<br>"
-    if team2_categories['raramente']:
-        rare_str = ', '.join([f"{name} ({total})" for name, total in team2_categories['raramente']])
-        team2_info_text += f"<em>Raramente:</em> {rare_str}"
-    maps_info.append(f"<li>{team2_info_text}</li>")
-    result_parts.append(f"<ul>{''.join(maps_info)}</ul>")
-    result_parts.append("\n<p><strong>Mapas Críticos (análise comparativa):</strong></p>")
-    critical_analysis = []
-    for map_name, comparison in map_comparison.items():
-        t1 = comparison['team1']
-        t2 = comparison['team2']
-        if t1['total'] == 0 or t2['total'] == 0:
-            continue
-        t1_wr = t1['winrate']
-        t2_wr = t2['winrate']
-        diff = abs(t1_wr - t2_wr)
-        confidence_factor = min(1.0, (t1['total'] + t2['total']) / 20.0)
-        criticality = diff * confidence_factor
-        advantage_team = team1['name'] if t1_wr > t2_wr else team2['name']
-        critical_analysis.append({
-            'map': map_name,
-            'diff': diff,
-            'criticality': criticality,
-            'advantage': advantage_team,
-            't1': t1,
-            't2': t2
-        })
-    critical_dict = {c['map']: c for c in critical_analysis}
-    critical_items = []
-    for map_name in CS2_MAPS.values():
-        if map_name in critical_dict:
-            critical = critical_dict[map_name]
-            diff = critical['diff']
-            if 1 <= diff <= 15:
-                favoritismo = "baixo favoritismo"
-                fav_class = "text-danger"
-            elif 16 <= diff <= 30:
-                favoritismo = "médio favoritismo"
-                fav_class = "text-tr"
-            else:
-                favoritismo = "alto favoritismo"
-                fav_class = "text-success"
-            critical_items.append(f"<li><strong>{critical['map']}</strong>: {critical['advantage']} favorito (<strong class='{fav_class}'>{favoritismo}</strong>)</li>")
-    result_parts.append(f"<ul>{''.join(critical_items)}</ul>" if critical_items else "<p>Todos os mapas têm distribuição equilibrada.</p>")
-    result_parts.append("\n<p><strong>Desempenho em Mapas:</strong></p>")
-    map_items = []
-    for map_name in CS2_MAPS.values():
-        if map_name not in map_comparison:
-            continue
-        comparison = map_comparison[map_name]
-        t1 = comparison['team1']
-        t2 = comparison['team2']
-        if t1['total'] == 0 or t2['total'] == 0:
-            continue
-        t1_wr_class = get_performance_class(t1['winrate'])
-        t2_wr_class = get_performance_class(t2['winrate'])
-        map_items.append(f"<li><strong>{map_name}</strong>: {team1['name']} <strong class='{t1_wr_class}'>{t1['winrate']}%</strong> ({t1['wins']}V-{t1['losses']}D) vs {team2['name']} <strong class='{t2_wr_class}'>{t2['winrate']}%</strong> ({t2['wins']}V-{t2['losses']}D)</li>")
-    result_parts.append(f"<ul>{''.join(map_items)}</ul>" if map_items else "<p>Sem mapas em comum.</p>")
+    maps_analysis_html = format_maps_analysis(team1, team2, map_comparison, for_llm=False)
+    result_parts.append(maps_analysis_html)
     result = "".join(result_parts)
     return result
 
@@ -467,7 +524,7 @@ def generate_team_analysis(app, analysis_id: int, team_slug: str):
             maps_6m = format_maps(data.get("all_games", []), team_slug, True)
             leagues = format_leagues(team_slug)     
             prompt = PromptTemplate.from_template("""
-You are a professional CS2 esports analyst writing a human expert analysis (not structured with numbers).
+You are a professional CS2(Counter Strike 2) esports analyst writing a human expert analysis (not structured with numbers).
 Write organic, flowing text about the team's positioning and recent form. Focus on last 6 months.
 RULES: Brazilian Portuguese only, valid HTML tags only (<p>,<strong>,<br>), max ~200 words, no invented data, NO NUMBERED LISTS.
 Use <strong> tags to highlight: team name, key statistics, relevant performance data, and important achievements.
@@ -502,7 +559,7 @@ def generate_game_analysis(app, analysis_id: int, game_slug: str):
             if not data:
                 game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
                 if game_analytic:
-                    game_analytic.pt_text = "Jogo não encontrado ou não é pré-jogo (status != upcoming)."
+                    game_analytic.pt_text = "Jogo não possui estatísticas suficientes para análise."
                     game_analytic.status = 'success'
                     db.session.commit()
                 return
@@ -512,15 +569,22 @@ def generate_game_analysis(app, analysis_id: int, game_slug: str):
             map_comparison = data['map_comparison']
             bo_type = game_info.get('bo_type', 3)
             prompt = PromptTemplate.from_template("""
-You are a professional CS2 esports analyst writing a pre-game prediction analysis.
+You are a professional CS2(Counter Strike 2) esports analyst writing a pre-game prediction analysis.
 Write organic, flowing text comparing both teams and predicting the match outcome. Focus on last 6 months data.
-RULES: Brazilian Portuguese only, use HTML tags (<p>, <strong>, <br>), max ~250 words, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
+RULES: Brazilian Portuguese only, use HTML tags (<p>, <strong>, <br>), max ~280 words, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
 Use <strong> tags to highlight: team names, statistics, key differences. Wrap entire response in <p> tags.
 Write as an expert would: discuss team comparison, map pool differences, recent form, and likely outcome.
+Don't write about the day or date, as the analysis can be done days before the game.
 DATA: 
 Team1: {team1_info} | Stats: {team1_stats} | Performance: {team1_perf} | Recent games: {team_1_recent}
 Team2: {team2_info} | Stats: {team2_stats} | Performance: {team2_perf} | Recent games: {team_2_recent}
-Match: BO{bo_type}""")
+Maps Analysis: {maps_analysis}
+Match: BO{bo_type}
+ANALYSIS PRIORITY (CRITICAL):
+30% - Team Stats/Performance/Recent games.
+70% - Maps Analysis + BO{bo_type}.
+Prioritize map veto/pick dynamics and BO{bo_type} impact(bo1, bo3 or bo5). Analyze likely picks, bans, comfort maps, decider advantage, and map pool matchup. Use team stats/recent form only as secondary support for the prediction.
+""")
             chain = prompt | ChatOpenAI(model="gpt-4o-mini", api_key=current_app.config["OPENAI_API_KEY"])
             response = chain.invoke({
                 "team1_info": format_intro(team1['name'], team1['rank'], team1['country'], team1.get('region')),
@@ -531,6 +595,7 @@ Match: BO{bo_type}""")
                 "team2_stats": format_stats(team2['stats_6m'], is_team=False) if team2['stats_6m'] else "N/A",
                 "team2_perf": format_performance({'6_months': team2['performance_6m']}, only_6m=True),
                 "team_2_recent": format_recent_games(team2['recent_games'], team2['slug'], for_llm=True),
+                "maps_analysis": format_maps_analysis(team1, team2, map_comparison, for_llm=True),
                 "bo_type": bo_type
             })
             result = generate_text_analysis(response, team1, team2, map_comparison)
@@ -544,7 +609,7 @@ Match: BO{bo_type}""")
             logger.error(f"game analysis error: {e}\n{traceback.format_exc()}")
             game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
             if game_analytic:
-                game_analytic.status = 'error'
+                db.session.delete(game_analytic)
                 db.session.commit()
 
 @bp.route('/team', methods=["GET"])
@@ -578,8 +643,8 @@ def ai_analytics_team():
         result = None
         if team_analytic.status == 'success':
             result = team_analytic.pt_text
-            current_app.cache.set(cache_key, {"ai_analytics_team": result, "status": "success"}, timeout=86400)
-        return responseApi({"ai_analytics_team": result, "status": team_analytic.status}, 200)
+            current_app.cache.set(cache_key, {"ai_analytics_team": result, "status": "success", "timestamp": team_analytic.updated_at}, timeout=86400)
+        return responseApi({"ai_analytics_team": result, "status": team_analytic.status, "timestamp": team_analytic.updated_at}, 200)
     except Exception as e:
         logger.error(f"team endpoint error: {e}\n{traceback.format_exc()}")
         return responseApi({"error": "internal_error"}, 500)
@@ -613,8 +678,8 @@ def ai_analytics_game():
         result = None
         if game_analytic.status == 'success':
             result = game_analytic.pt_text
-            current_app.cache.set(cache_key, {"ai_analytics_game": result, "status": "success"}, timeout=86400)
-        return responseApi({"ai_analytics_game": result, "status": game_analytic.status}, 200)
+            current_app.cache.set(cache_key, {"ai_analytics_game": result, "status": "success", "timestamp": game_analytic.updated_at}, timeout=86400)
+        return responseApi({"ai_analytics_game": result, "status": game_analytic.status, "timestamp": game_analytic.updated_at}, 200)
     except Exception as e:
         logger.error(f"game endpoint error: {e}\n{traceback.format_exc()}")
         return responseApi({"error": "internal_error"}, 500)

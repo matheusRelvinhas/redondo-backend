@@ -1,6 +1,6 @@
 from flask import Blueprint, request, current_app
 from models import PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months
-from utils import responseApi, token_service_required
+from utils import responseApi, token_service_required, cache_return
 
 def player_info(periods_to_query, slug):
     stats_list = []
@@ -54,16 +54,12 @@ bp = Blueprint('player_stats', __name__, url_prefix='/api/player_stats')
 
 @bp.route('', methods=["GET"])
 @token_service_required
+@cache_return(timeout=20*60)
 def player_stats():
     period = request.args.get('period')
     game_count = request.args.get('game_count')
     if not period or not game_count:
         return responseApi({"error": "missing_arguments"}, 400)
-    cache_key = f"stats_player::{period}::{game_count}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
-        return responseApi(cached, 200)
     model = {
         'last_month': PlayerStatsLastMonth,
         '3_months': PlayerStats3Months,
@@ -74,11 +70,11 @@ def player_stats():
         return responseApi({"error": "invalid_period"}, 400)
     players = model.query.filter(model.games_count >= game_count).all()
     result = {"players": [p.to_dict() for p in players]}
-    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
 
 @bp.route('/player', methods=["GET"])
 @token_service_required
+@cache_return(timeout=20*60)
 def player():
     slug = request.args.get('slug')
     period = request.args.get('period')
@@ -90,24 +86,11 @@ def player():
         '6': PlayerStats6Months,
         '12': PlayerStats12Months
     }
-
     if period and period in model_map:
         periods_to_query = {period: model_map[period]}
-        cache_suffix = period
     else:
         periods_to_query = model_map
-        cache_suffix = "all"
-
-    cache_key = f"player_info::{slug}::{cache_suffix}"
-    cached = current_app.cache.get(cache_key)
-    if cached:
-        current_app.limiter.limit("600 per 1 minutes")(lambda: None)()
-        return responseApi(cached, 200)
-    
     result = player_info(periods_to_query, slug)
-    
     if not result['stats']:
         return responseApi({"error": "player_not_found"}, 404)
-
-    current_app.cache.set(cache_key, result, timeout=60 * 20)
     return responseApi(result, 200)
