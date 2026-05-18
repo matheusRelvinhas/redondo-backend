@@ -11,6 +11,7 @@ from authlib.integrations.flask_client import OAuth
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_talisman import Talisman
 from loguru import logger
+from cache_scheduler import init_cache_cleanup_scheduler
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
@@ -19,9 +20,15 @@ def create_app():
     config = get_config()
     app.config.from_object(config)
     
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app, 
+        x_for=1,
+        x_proto=1,
+        x_host=1
+    )
+
     
-    Talisman(app, content_security_policy=None)
+    Talisman(app, content_security_policy=None, force_https=False)
     
     cache = Cache(app)
     app.cache = cache
@@ -66,6 +73,8 @@ def create_app():
         if not request.headers.get("User-Agent"):
             ip = request.remote_addr
             app.logger.warning(f"Suspicious request from: {ip}")
+    
+    init_cache_cleanup_scheduler(app, interval_hours=6)
     
     register_blueprints(app)
 

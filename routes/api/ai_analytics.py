@@ -526,7 +526,7 @@ def generate_team_analysis(app, analysis_id: int, team_slug: str):
             prompt = PromptTemplate.from_template("""
 You are a professional CS2(Counter Strike 2) esports analyst writing a human expert analysis (not structured with numbers).
 Write organic, flowing text about the team's positioning and recent form. Focus on last 6 months.
-RULES: Brazilian Portuguese only, valid HTML tags only (<p>,<strong>,<br>), max ~200 words, no invented data, NO NUMBERED LISTS.
+RULES: Brazilian Portuguese only, valid HTML tags only (<p>,<strong>,<br>), max ~200 words, 3 paragraphs, no invented data, NO NUMBERED LISTS.
 Use <strong> tags to highlight: team name, key statistics, relevant performance data, and important achievements.
 Write as an expert would: discuss team positioning, current form, performance trends, and map strengths naturally.
 DATA: Team: {team} | Stats: {stats} | Performance: {performance} | Top Maps: {maps} | Active Leagues: {leagues} | Recent Form: {recent}""")
@@ -571,7 +571,7 @@ def generate_game_analysis(app, analysis_id: int, game_slug: str):
             prompt = PromptTemplate.from_template("""
 You are a professional CS2(Counter Strike 2) esports analyst writing a pre-game prediction analysis.
 Write organic, flowing text comparing both teams and predicting the match outcome. Focus on last 6 months data.
-RULES: Brazilian Portuguese only, use HTML tags (<p>, <strong>, <br>), max ~280 words, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
+RULES: Brazilian Portuguese only, use HTML tags (<p>, <strong>, <br>), max ~280 words, 3 paragraphs, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
 Use <strong> tags to highlight: team names, statistics, key differences. Wrap entire response in <p> tags.
 Write as an expert would: discuss team comparison, map pool differences, recent form, and likely outcome.
 Don't write about the day or date, as the analysis can be done days before the game.
@@ -581,8 +581,9 @@ Team2: {team2_info} | Stats: {team2_stats} | Performance: {team2_perf} | Recent 
 Maps Analysis: {maps_analysis}
 Match: BO{bo_type}
 ANALYSIS PRIORITY (CRITICAL):
+10% - {team1_info} & {team2_info} comparison vale rank (rank).
 30% - Team Stats/Performance/Recent games.
-70% - Maps Analysis + BO{bo_type}.
+60% - Maps Analysis + BO{bo_type}.
 Prioritize map veto/pick dynamics and BO{bo_type} impact(bo1, bo3 or bo5). Analyze likely picks, bans, comfort maps, decider advantage, and map pool matchup. Use team stats/recent form only as secondary support for the prediction.
 """)
             chain = prompt | ChatOpenAI(model="gpt-4o-mini", api_key=current_app.config["OPENAI_API_KEY"])
