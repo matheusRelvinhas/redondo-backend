@@ -31,19 +31,34 @@ def generate_jwt_token(user_id):
     return encode
 
 def send_email_recovery(to_email, subject, html):
-    smtp_server = "smtp.hostinger.com"
-    smtp_port = 587
-    sender_email = os.getenv("SEND_EMAIL")
-    sender_password = os.getenv("SEND_PASSWORD")
-    msg = MIMEText(html, "html")
-    msg["Subject"] = subject
-    msg["From"] = sender_email
-    msg["To"] = to_email
-    server = smtplib.SMTP(smtp_server, smtp_port)
-    server.starttls()
-    server.login(sender_email, sender_password)
-    server.sendmail(sender_email, to_email, msg.as_string())
-    server.quit()
+    try:
+        smtp_server = "smtp.hostinger.com"
+        smtp_port = int(os.getenv("SEND_SMTP_PORT", 587))
+        sender_email = os.getenv("SEND_EMAIL")
+        sender_password = os.getenv("SEND_PASSWORD")
+        if not sender_email or not sender_password:
+            raise ValueError("Email credentials not configured")
+        msg = MIMEText(html, "html")
+        msg["Subject"] = subject
+        msg["From"] = sender_email
+        msg["To"] = to_email
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        else:
+            server = smtplib.SMTP(smtp_server, smtp_port)
+            server.starttls()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, to_email, msg.as_string())
+        server.quit()
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"Error authentication SMTP: {str(e)}")
+        raise
+    except smtplib.SMTPException as e:
+        logger.error(f"Error SMTP: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Error sending email to {to_email}: {type(e).__name__} - {str(e)}")
+        raise
 
 bp = Blueprint('login', __name__, url_prefix='/api/login')
 @bp.route('', methods=["GET"])
@@ -162,7 +177,7 @@ def recover_password():
         """
         send_email_recovery(
             email,
-            "Recuperar senha - REDONDO.FUN",
+            "Recuperar senha - REDONDO STATS",
             html
         )
         return responseApi({"message": "email_sent"}, 200)

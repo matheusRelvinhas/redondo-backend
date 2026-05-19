@@ -7,6 +7,7 @@ __pycache__/
 venv/
 .env
 .env.local
+.env.production
 
 # Ignorar dependências instaladas (caso use virtualenv sem venv/)
 *.log
