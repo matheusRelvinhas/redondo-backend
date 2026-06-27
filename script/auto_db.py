@@ -79,6 +79,16 @@ def iso_to_timestamp(iso_str: str) -> int:
     dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
     return int(dt.timestamp())
 
+def transform_slug(slug):
+    if slug:
+        return slug.replace('-vs-', '-rs-')
+    return slug
+
+def revert_slug(slug):
+    if slug:
+        return slug.replace('-rs-', '-vs-')
+    return slug
+
 def delete_games():
     two_days_ago = int(time.time()) - (2 * 24 * 60 * 60)
     one_year_ago = int(time.time()) - (365 * 24 * 60 * 60)
@@ -97,9 +107,16 @@ def delete_games():
 
 def addOrAttGamesInfo(g, is_live):
     game = GamesInfo.query.filter_by(game_id=safe_get(g, "id")).first()
+    ai_predictions = None
+    if (
+        (safe_get(g, 'ai_predictions', 'prediction_team1_score') is not None and isinstance(safe_get(g, 'ai_predictions', 'prediction_team1_score'), (int, float)))
+        and (safe_get(g, 'ai_predictions', 'prediction_team2_score') is not None and isinstance(safe_get(g, 'ai_predictions', 'prediction_team2_score'), (int, float)))
+    ):
+        ai_predictions = f"{safe_get(g, 'ai_predictions', 'prediction_team1_score')}-{safe_get(g, 'ai_predictions', 'prediction_team2_score')}"
+    else: print(g)
     game_data = {
         "game_id": safe_get(g, "id"),
-        "slug": safe_get(g, "slug"),
+        "slug": transform_slug(safe_get(g, "slug")),
         "status": safe_get(g, "status"),
         "parsed_status": safe_get(g, "parsed_status"),
         "bo_type": safe_get(g, "bo_type"),
@@ -115,6 +132,7 @@ def addOrAttGamesInfo(g, is_live):
         "team2_score": safe_get(g, "team2_score"),
         "league_id": safe_get(g, "tournament"),
         "games": safe_get(g, "games"),
+        "ai_predictions": ai_predictions
     }
     if not game:
         game = GamesInfo(**game_data)
@@ -180,7 +198,7 @@ def games_stage_round():
         or_(GamesInfo.stage_round == None, GamesInfo.games_score == None)
     ).all()
     for game in games:
-        url = f"{API_GAME_STATS_PART}{game.slug}?scope=show-match&stream_language=en&with=games,teams,tournament_deep,stage,ai_predictions"
+        url = f"{API_GAME_STATS_PART}{revert_slug(game.slug)}?scope=show-match&stream_language=en&with=games,teams,tournament_deep,stage,ai_predictions"
         logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
@@ -541,7 +559,7 @@ def games_players_stats():
         GamesInfo.parsed_status == 'done'
     )
     for game in games:
-        url = f"{API_GAME_STATS_PART}{game.slug}/players_stats"
+        url = f"{API_GAME_STATS_PART}{revert_slug(game.slug)}/players_stats"
         logger.info(f"Accessing: {url}")
         try:
             response = requests.get(url, timeout=60)
@@ -604,7 +622,7 @@ def games_players_short_stats():
     )
     for game in games:
         try:
-            url_short = f"{API_GAME_STATS_PART}{game.slug}/short_players_stats/"
+            url_short = f"{API_GAME_STATS_PART}{revert_slug(game.slug)}/short_players_stats/"
             logger.info(f"Accessing: {url_short}")
             response = requests.get(url_short, timeout=60)
             response.raise_for_status()
@@ -619,7 +637,7 @@ def games_players_short_stats():
                     if not map_name:
                         continue
                     try: 
-                        url_maps = f"{API_GAME_STATS_PART}{game.slug}/games/"
+                        url_maps = f"{API_GAME_STATS_PART}{revert_slug(game.slug)}/games/"
                         logger.info(f"Accessing: {url_maps}")
                         response_m = requests.get(url_maps + map_name, timeout=60)
                         response_m.raise_for_status()

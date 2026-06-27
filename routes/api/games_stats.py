@@ -3,6 +3,7 @@ from models import db, GamesInfo, LeaguesInfo, TeamsInfo
 from utils import responseApi, token_service_required, cache_return
 from datetime import datetime, timedelta
 from sqlalchemy.orm import undefer, load_only
+from sqlalchemy import or_, and_
 import pytz
 
 bp = Blueprint('games_stats', __name__, url_prefix='/api/games_stats')
@@ -85,7 +86,15 @@ def games_stats():
 @token_service_required
 @cache_return(timeout=60)
 def games_current():
-    games = GamesInfo.query.filter_by(status='current').all()
+    games = GamesInfo.query.filter(
+        or_(
+            GamesInfo.status == 'current',
+            and_(
+                GamesInfo.status == 'upcoming',
+                GamesInfo.start_timestamp <= datetime.utcnow()
+            )
+        )
+    ).all()
     games_list = [game.to_dict() for game in games]
     return responseApi({"games": games_list}, 200)
 
@@ -93,7 +102,12 @@ def games_current():
 @token_service_required
 @cache_return(timeout=60*10)
 def games_upcoming():
-    games = GamesInfo.query.filter_by(status='upcoming').all()
+    games = GamesInfo.query.filter(
+        and_(
+            GamesInfo.status == 'upcoming',
+            GamesInfo.start_timestamp > datetime.utcnow()
+        )
+    ).all()
     games_list = [game.to_dict() for game in games]
     result = {"games": games_list}
     return responseApi(result, 200)

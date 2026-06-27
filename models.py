@@ -293,12 +293,13 @@ class GamesInfo(db.Model):
     games_score = db.Column(db.JSON, nullable=True)
     stage_round = db.Column(db.JSON, nullable=True)
     maps = db.Column(db.JSON, nullable=True)
+    ai_predictions = db.Column(db.String(50), nullable=True)
+    redondo_predictions = db.Column(db.String(50), nullable=True)
     players_stats = deferred(db.Column(db.JSON, nullable=True))
     maps_players_stats = deferred(db.Column(db.JSON, nullable=True))
     short_players_stats = deferred(db.Column(db.JSON, nullable=True))
     short_maps_players_stats = deferred(db.Column(db.JSON, nullable=True))
     game_side_stats = deferred(db.Column(db.JSON, nullable=True))
-    live_stats = deferred(db.Column(db.JSON, nullable=True))
 
     created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
     updated_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), onupdate=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)
@@ -307,7 +308,7 @@ class GamesInfo(db.Model):
         exclude_fields = {
             "game_id", "league_id", "team1_id", "team2_id", "winner_team_id", "games", "players_stats", 
             "maps", "maps_players_stats", "short_players_stats", "short_maps_players_stats", 
-            "game_side_stats", "live_stats"
+            "game_side_stats", "live_stats", "redondo_predictions"
         }
         data = {
             c.name: getattr(self, c.name)
@@ -357,6 +358,10 @@ class GamesInfo(db.Model):
         data["team2_slug"] = team2_slug
         data["team2_img_url"] = team2_img_url
         data["winner_team_slug"] = winner_team_slug
+        if self.status != 'finished':
+            data["ai_predictions"] = None
+        if self.redondo_predictions:
+            data["ai_predictions"] = self.redondo_predictions
         return data
 
 class AiAnalytics(db.Model):

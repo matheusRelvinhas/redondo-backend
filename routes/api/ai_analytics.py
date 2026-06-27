@@ -100,7 +100,7 @@ def format_performance(perf, only_6m=False):
         perf_value = data.get('performance', 'N/A')
         perf_class = get_performance_class(perf_value)
         perf_html = f"<strong class='{perf_class}'>{perf_value}</strong>" if perf_value != 'N/A' else perf_value
-        return f"Nos últimos 6 meses, {data.get('win', 0)}V-{data.get('lose', 0)}D ({perf_html} aproveitamento)."
+        return f"Nos últimos 6 meses, {data.get('win', 0)}V-{data.get('lose', 0)}D ({perf_html} desempenho)"
     
     period_order = ["last_month", "3_months", "6_months", "12_months"]
     result = []
@@ -110,7 +110,7 @@ def format_performance(perf, only_6m=False):
             perf_value = data.get('performance', 'N/A')
             perf_class = get_performance_class(perf_value)
             perf_html = f"<strong class='{perf_class}'>{perf_value}</strong>" if perf_value != 'N/A' else perf_value
-            result.append(f"<p><strong>{period_labels.get(p, p)}:</strong> {data.get('win', 0)}V-{data.get('lose', 0)}D ({perf_html} aproveitamento).</p>")
+            result.append(f"<p><strong>{period_labels.get(p, p)}:</strong> {data.get('win', 0)}V-{data.get('lose', 0)}D ({perf_html} desempenho)</p>")
     return "".join(result)
 
 def format_maps(games, team_slug, only_6m=False):
@@ -217,11 +217,11 @@ def format_leagues(team_slug):
 
 def format_recent_games(games, team_slug=None, for_llm=False):
     if not games:
-        return "Sem partidas recentes." if for_llm else "<p>Sem partidas recentes.</p>"
+        return "Sem jogos recentes." if for_llm else "<p>Sem jogos recentes.</p>"
     if for_llm:
         wins = sum(1 for g in games if (g.get('team1_slug') == team_slug and g.get('team1_score', 0) > g.get('team2_score', 0)) 
                   or (g.get('team2_slug') == team_slug and g.get('team2_score', 0) > g.get('team1_score', 0)))
-        return f"Últimas {len(games)} partidas: {wins}V-{len(games)-wins}D ({round(wins/len(games)*100 if games else 0)}% aproveitamento)"
+        return f"Últimos {len(games)} jogos: {wins}V-{len(games)-wins}D ({round(wins/len(games)*100 if games else 0)}% aproveitamento)"
     items = []
     for g in games:
         is_team1 = g.get('team1_slug') == team_slug
@@ -232,7 +232,7 @@ def format_recent_games(games, team_slug=None, for_llm=False):
         color = "success" if result == "VITÓRIA" else "danger"
         items.append(f"<li>Vs {opponent}: <strong>{t_score}x{opp_score}</strong> - <strong class='text-{color}'>{result}</strong></li>")
     wins = sum(1 for i in items if "VITÓRIA" in i)
-    return (f"<ul>{''.join(items)}</ul><p>Últimas 5 partidas: <strong>{wins}V - {len(items)-wins}D</strong> "
+    return (f"<ul>{''.join(items)}</ul><p>Últimos 5 jogos: <strong>{wins}V - {len(items)-wins}D</strong> "
             f"(Desempenho: <strong class='{get_performance_class(wins/len(items)*100 if items else 0)}'>{round(wins/len(items)*100)}%</strong>)</p>")
 
 def extract_map_categories_6m(maps_dict):
@@ -253,6 +253,21 @@ def extract_map_categories_6m(maps_dict):
         'bem_estabelecidos': bem_estabelecidos
     }
 
+def format_last_clashes_analysis(clashes_data, team1, team2):
+    games = clashes_data.get('games', 0)
+    team1_wins = clashes_data.get('team1_wins', 0)
+    team2_wins = clashes_data.get('team2_wins', 0)
+    if games == 0:
+        return "<p>Sem histórico de confrontos diretos entre essas equipes.</p>"
+    team1_wr = round(team1_wins / games * 100) if games > 0 else 0
+    team2_wr = round(team2_wins / games * 100) if games > 0 else 0
+    team1_wr_class = get_performance_class(team1_wr)
+    team2_wr_class = get_performance_class(team2_wr)
+    result_parts = []
+    result_parts.append("\n<p><strong>Histórico de Confrontos Diretos (últimos 5 jogos):</strong><br>")
+    result_parts.append(f"Confrontos diretos: <strong>{games}</strong> jogos | <strong>{team1['name']}</strong> <strong class='{team1_wr_class}'>{team1_wins}V ({team1_wr}%)</strong> vs <strong>{team2['name']}</strong> <strong class='{team2_wr_class}'>{team2_wins}V ({team2_wr}%)</strong></p>")
+    return "".join(result_parts)
+
 def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
     if for_llm:
         team1_analyzed_maps = [(name, stats) for name, stats in team1['maps'].items() if stats['total'] >= 5]
@@ -261,9 +276,9 @@ def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
         team2_best_map = max(team2_analyzed_maps, key=lambda x: x[1]['winrate']) if team2_analyzed_maps else None
         analysis_text = f"\nAnálise de Mapas (últimos 6 meses): "
         if team1_best_map:
-            analysis_text += f"{team1['name']} é forte em {team1_best_map[0]} ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} partidas). "
+            analysis_text += f"{team1['name']} é forte em {team1_best_map[0]} ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} jogos). "
         if team2_best_map:
-            analysis_text += f"{team2['name']} é forte em {team2_best_map[0]} ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} partidas). "
+            analysis_text += f"{team2['name']} é forte em {team2_best_map[0]} ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} jogos). "
         critical_analysis = []
         for map_name, comparison in map_comparison.items():
             t1 = comparison['team1']
@@ -301,7 +316,7 @@ def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
         maps_info = []
         team1_info_text = f"<strong>{team1['name']}</strong>"
         if team1_best_map:
-            team1_info_text += f" - Melhor mapa: <strong>{team1_best_map[0]}</strong> ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} partidas)"
+            team1_info_text += f" - Melhor mapa: <strong>{team1_best_map[0]}</strong> ({team1_best_map[1]['winrate']}% em {team1_best_map[1]['total']} jogos)"
         team1_info_text += "<br>"
         if team1_categories['veto_fixo']:
             team1_info_text += f"<em>Veto fixo ou não jogado:</em> {', '.join(team1_categories['veto_fixo'])}<br>"
@@ -311,7 +326,7 @@ def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
         maps_info.append(f"<li>{team1_info_text}</li>")
         team2_info_text = f"<strong>{team2['name']}</strong>"
         if team2_best_map:
-            team2_info_text += f" - Melhor mapa: <strong>{team2_best_map[0]}</strong> ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} partidas)"
+            team2_info_text += f" - Melhor mapa: <strong>{team2_best_map[0]}</strong> ({team2_best_map[1]['winrate']}% em {team2_best_map[1]['total']} jogos)"
         team2_info_text += "<br>"
         if team2_categories['veto_fixo']:
             team2_info_text += f"<em>Veto fixo ou não jogado:</em> {', '.join(team2_categories['veto_fixo'])}<br>"
@@ -360,9 +375,7 @@ def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
                     favoritismo = "baixo favoritismo"
                     fav_class = "text-danger"
                 critical_items.append(f"<li><strong>{critical['map']}</strong>: {critical['advantage']} favorito (<strong class='{fav_class}'>{favoritismo}</strong>)</li>")
-        
         result_parts.append(f"<ul>{''.join(critical_items)}</ul>" if critical_items else "<p>Todos os mapas têm distribuição equilibrada.</p>")
-        
         result_parts.append("\n<p><strong>Desempenho em Mapas:</strong></p>")
         map_items = []
         for map_name in CS2_MAPS.values():
@@ -376,9 +389,7 @@ def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
             t1_wr_class = get_performance_class(t1['winrate'])
             t2_wr_class = get_performance_class(t2['winrate'])
             map_items.append(f"<li><strong>{map_name}</strong>: {team1['name']} <strong class='{t1_wr_class}'>{t1['winrate']}%</strong> ({t1['wins']}V-{t1['losses']}D) vs {team2['name']} <strong class='{t2_wr_class}'>{t2['winrate']}%</strong> ({t2['wins']}V-{t2['losses']}D)</li>")
-        
         result_parts.append(f"<ul>{''.join(map_items)}</ul>" if map_items else "<p>Sem mapas em comum.</p>")
-        
         return "".join(result_parts)
 
 def extract_maps_data_6m(games, team_slug):
@@ -416,6 +427,29 @@ def extract_maps_data_6m(games, team_slug):
             'winrate': wr
         }
     return result
+
+def get_last_games_clashes(team1, team2, limit=5):
+    clashes = db.session.query(GamesInfo).filter(
+        ((GamesInfo.team1_id == team1.team_id) & (GamesInfo.team2_id == team2.team_id)) |
+        ((GamesInfo.team1_id == team2.team_id) & (GamesInfo.team2_id == team1.team_id))
+    ).filter(
+        GamesInfo.status == 'finished'
+    ).order_by(GamesInfo.start_date.desc()).limit(limit).all()
+    clashes_list = [g.to_dict() for g in clashes]
+    team1_wins = 0
+    team2_wins = 0
+    for clash in clashes_list:
+        winner = clash.get('winner_team_slug')
+        if winner == team1.slug:
+            team1_wins += 1
+        elif winner == team2.slug:
+            team2_wins += 1
+    return {
+        'games': len(clashes_list),
+        'team1_wins': team1_wins,
+        'team2_wins': team2_wins,
+        'clashes': clashes_list
+    }
 
 def get_game_ai_analytics(game_slug):
     game = db.session.query(GamesInfo).filter(GamesInfo.slug == game_slug).first()
@@ -457,6 +491,7 @@ def get_game_ai_analytics(game_slug):
     team2_stats_6m = team2_data.get('aggregated_stats', {}).get('6_months', {})
     team1_recent = team1_data.get('recent_games', [])
     team2_recent = team2_data.get('recent_games', [])
+    last_clashes = get_last_games_clashes(team1, team2)
     return {
         'game_info': {
             'slug': game_slug,
@@ -464,6 +499,7 @@ def get_game_ai_analytics(game_slug):
             'bo_type': game.bo_type,
             'tier': game.tier,
             'start_date': game.start_date,
+            'ai_predictions': game.ai_predictions
         },
         'team1': {
             'slug': team1_slug,
@@ -487,10 +523,11 @@ def get_game_ai_analytics(game_slug):
             'stats_6m': team2_stats_6m,
             'recent_games': team2_recent
         },
-        'map_comparison': map_comparison
+        'map_comparison': map_comparison,
+        'last_clashes': last_clashes
     }
 
-def generate_text_analysis(response, team1, team2, map_comparison):
+def generate_text_analysis(response, team1, team2, map_comparison, clashes_data=None):
     result_parts = []
     result_parts.append(response.content.strip())
     result_parts.append("\n<p><strong>Análise de Jogos (últimos 6 meses):</strong></p>")
@@ -502,6 +539,10 @@ def generate_text_analysis(response, team1, team2, map_comparison):
     perf_items.append(f"<li><strong>{team1['name']}</strong><br>{team1_perf_html}<br>{team1_recent_html}</li>")
     perf_items.append(f"<li><strong>{team2['name']}</strong><br>{team2_perf_html}<br>{team2_recent_html}</li>")
     result_parts.append(f"<ul>{''.join(perf_items)}</ul>")
+    if clashes_data and clashes_data.get('games', 0) > 0:
+        print('ok')
+        clashes_analysis_html = format_last_clashes_analysis(clashes_data, team1, team2)
+        result_parts.append(clashes_analysis_html)
     maps_analysis_html = format_maps_analysis(team1, team2, map_comparison, for_llm=False)
     result_parts.append(maps_analysis_html)
     result = "".join(result_parts)
@@ -543,7 +584,7 @@ DATA: Team: {team} | Stats: {stats} | Performance: {performance} | Top Maps: {ma
             result = (f"{response.content.strip()}<br><strong>Desempenho por período:</strong><br>"
                      f"{format_performance(data.get('games_info', {}))}<br><strong>Desempenho em mapas:</strong><br>"
                      f"{format_maps(data.get('all_games', []), team_slug)}<br><strong>Ligas:</strong><br>"
-                     f"{leagues}<br><strong>Partidas Recentes:</strong><br>{format_recent_games(data.get('recent_games', []), team_slug)}") 
+                     f"{leagues}<br><strong>Jogos Recentes:</strong><br>{format_recent_games(data.get('recent_games', []), team_slug)}") 
             team_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
             if team_analytic:
                 team_analytic.pt_text = result
@@ -551,6 +592,154 @@ DATA: Team: {team} | Stats: {stats} | Performance: {performance} | Top Maps: {ma
                 db.session.commit()
         except Exception as e:
             logger.error(f"team analysis error: {e}\n{traceback.format_exc()}")
+
+def parse_ai_prediction_to_probability(prediction_str):
+    if not prediction_str or prediction_str is None:
+        return None
+    try:
+        parts = str(prediction_str).split('-')
+        if len(parts) != 2:
+            return None
+        team1_score = int(parts[0])
+        team2_score = int(parts[1])
+
+        total_games = team1_score + team2_score
+        if total_games == 0:
+            return None
+        team1_prob = team1_score / total_games
+        return team1_prob
+    except:
+        return None
+
+
+def calculate_game_prediction(data):
+    """
+    Calcula a predição do resultado do jogo baseado em algoritmo com pesos.
+    
+    Pesos:
+    - 8% Rank dos times
+    - 12% Stats/Performance/Recent games
+    - 24% Last clashes (últimos confrontos diretos)
+    - 36% Maps Analysis
+    - 20% AI Prediction pré-existente (pré-análise do banco)
+    
+    Retorna string com predição (ex: "2-0", "2-1", "3-1", "0-1")
+    """
+    team1 = data['team1']
+    team2 = data['team2']
+    game_info = data['game_info']
+    map_comparison = data['map_comparison']
+    last_clashes = data.get('last_clashes', {})
+    bo_type = game_info.get('bo_type', 3)
+    rank1 = team1.get('rank', 999)
+    rank2 = team2.get('rank', 999)
+    max_rank = max(rank1, rank2, 1)
+    rank_score_team1 = (max_rank - rank1) / max_rank if rank1 < 999 else 0.5
+    rank_score_team2 = (max_rank - rank2) / max_rank if rank2 < 999 else 0.5
+    stats_score_team1 = 0
+    stats_score_team2 = 0
+    perf1 = team1.get('performance_6m', {})
+    perf2 = team2.get('performance_6m', {})
+    win_rate1 = perf1.get('performance', '50%')
+    win_rate2 = perf2.get('performance', '50%')
+    if isinstance(win_rate1, str):
+        win_rate1 = int(win_rate1.rstrip('%')) / 100
+    else:
+        win_rate1 = win_rate1 / 100 if win_rate1 > 1 else win_rate1
+    if isinstance(win_rate2, str):
+        win_rate2 = int(win_rate2.rstrip('%')) / 100
+    else:
+        win_rate2 = win_rate2 / 100 if win_rate2 > 1 else win_rate2
+    total_wr = win_rate1 + win_rate2 if (win_rate1 + win_rate2) > 0 else 1
+    stats_score_team1 = win_rate1 / total_wr if total_wr > 0 else 0.5
+    stats_score_team2 = win_rate2 / total_wr if total_wr > 0 else 0.5
+    clashes_score_team1 = 0.5
+    clashes_score_team2 = 0.5
+    if last_clashes.get('games', 0) > 0:
+        total_clashes = last_clashes.get('games', 1)
+        team1_clash_wins = last_clashes.get('team1_wins', 0)
+        team2_clash_wins = last_clashes.get('team2_wins', 0)
+        
+        if total_clashes > 0:
+            clashes_score_team1 = team1_clash_wins / total_clashes
+            clashes_score_team2 = team2_clash_wins / total_clashes
+    maps_score_team1 = 0
+    maps_score_team2 = 0
+    map_count = 0
+    for map_name, comparison in map_comparison.items():
+        t1_wr = comparison.get('team1', {}).get('winrate', 0) or 0
+        t2_wr = comparison.get('team2', {}).get('winrate', 0) or 0
+        total_map_wr = (t1_wr + t2_wr) if (t1_wr + t2_wr) > 0 else 1
+        if total_map_wr > 0:
+            maps_score_team1 += t1_wr / total_map_wr
+            maps_score_team2 += t2_wr / total_map_wr
+            map_count += 1
+    if map_count > 0:
+        maps_score_team1 /= map_count
+        maps_score_team2 /= map_count
+    else:
+        maps_score_team1 = 0.5
+        maps_score_team2 = 0.5
+    ai_pred = game_info.get('ai_predictions')
+    ai_pred_prob_team1 = parse_ai_prediction_to_probability(ai_pred)
+    if ai_pred_prob_team1 is not None:
+        ai_pred_prob_team2 = 1 - ai_pred_prob_team1
+        final_score_team1 = (
+            rank_score_team1 * 0.08 +
+            stats_score_team1 * 0.12 +
+            clashes_score_team1 * 0.24 +
+            maps_score_team1 * 0.36 +
+            ai_pred_prob_team1 * 0.20
+        )
+        final_score_team2 = (
+            rank_score_team2 * 0.08 +
+            stats_score_team2 * 0.12 +
+            clashes_score_team2 * 0.24 +
+            maps_score_team2 * 0.36 +
+            ai_pred_prob_team2 * 0.20
+        )
+    else:
+        final_score_team1 = (
+            rank_score_team1 * 0.10 +
+            stats_score_team1 * 0.15 +
+            clashes_score_team1 * 0.30 +
+            maps_score_team1 * 0.45
+        )
+        final_score_team2 = (
+            rank_score_team2 * 0.10 +
+            stats_score_team2 * 0.15 +
+            clashes_score_team2 * 0.30 +
+            maps_score_team2 * 0.45
+        )
+    total_score = final_score_team1 + final_score_team2 if (final_score_team1 + final_score_team2) > 0 else 1
+    team1_probability = final_score_team1 / total_score if total_score > 0 else 0.5
+    if bo_type == 1:
+        return "1-0" if team1_probability >= 0.5 else "0-1"
+
+    elif bo_type == 3:
+        if team1_probability >= 0.65:
+            return "2-0"
+        elif team1_probability >= 0.5:
+            return "2-1"
+        elif team1_probability >= 0.35:
+            return "1-2"
+        else:
+            return "0-2"
+    elif bo_type == 5:
+        if team1_probability >= 0.7:
+            return "3-0"
+        elif team1_probability >= 0.6:
+            return "3-1"
+        elif team1_probability >= 0.5:
+            return "3-2"
+        elif team1_probability >= 0.4:
+            return "2-3"
+        elif team1_probability >= 0.3:
+            return "1-3"
+        else:
+            return "0-3"
+    return "2-1" if team1_probability >= 0.5 else "1-2"
+
 
 def generate_game_analysis(app, analysis_id: int, game_slug: str):
     with app.app_context():
@@ -568,38 +757,35 @@ def generate_game_analysis(app, analysis_id: int, game_slug: str):
             game_info = data['game_info']
             map_comparison = data['map_comparison']
             bo_type = game_info.get('bo_type', 3)
+            ai_prediction = calculate_game_prediction(data)
             prompt = PromptTemplate.from_template("""
 You are a professional CS2(Counter Strike 2) esports analyst writing a pre-game prediction analysis.
-Write organic, flowing text comparing both teams and predicting the match outcome. Focus on last 6 months data.
-RULES: Brazilian Portuguese only, use HTML tags (<p>, <strong>, <br>), max ~280 words, 3 paragraphs, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
-Use <strong> tags to highlight: team names, statistics, key differences. Wrap entire response in <p> tags.
-Write as an expert would: discuss team comparison, map pool differences, recent form, and likely outcome.
+Write organic, flowing text comparing both teams and presenting the predicted match outcome. Focus on last 6 months data.
+RULES: Brazilian Portuguese only, ONLY use HTML tags (<p>, <strong>, <br>) - NO MARKDOWN, NO ** OR __, max ~280 words, 3 paragraphs, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
+IMPORTANT: Use ONLY <strong>text</strong> format, NEVER use **text** or __text__ markdown formatting.
+Use <strong> tags to highlight: team names, statistics, key differences, and the predicted result.
+Write as an expert would: discuss team comparison, map pool differences, recent form, and explain the predicted outcome.
 Don't write about the day or date, as the analysis can be done days before the game.
+PREDICTED RESULT: {ai_prediction}
 DATA: 
-Team1: {team1_info} | Stats: {team1_stats} | Performance: {team1_perf} | Recent games: {team_1_recent}
-Team2: {team2_info} | Stats: {team2_stats} | Performance: {team2_perf} | Recent games: {team_2_recent}
+Team1: {team1_info}
+Team2: {team2_info}
 Maps Analysis: {maps_analysis}
 Match: BO{bo_type}
-ANALYSIS PRIORITY (CRITICAL):
-10% - {team1_info} & {team2_info} comparison vale rank (rank).
-30% - Team Stats/Performance/Recent games.
-60% - Maps Analysis + BO{bo_type}.
-Prioritize map veto/pick dynamics and BO{bo_type} impact(bo1, bo3 or bo5). Analyze likely picks, bans, comfort maps, decider advantage, and map pool matchup. Use team stats/recent form only as secondary support for the prediction.
 """)
             chain = prompt | ChatOpenAI(model="gpt-4o-mini", api_key=current_app.config["OPENAI_API_KEY"])
             response = chain.invoke({
+                "ai_prediction": ai_prediction,
                 "team1_info": format_intro(team1['name'], team1['rank'], team1['country'], team1.get('region')),
-                "team1_stats": format_stats(team1['stats_6m'], is_team=False) if team1['stats_6m'] else "N/A",
-                "team1_perf": format_performance({'6_months': team1['performance_6m']}, only_6m=True),
-                "team_1_recent": format_recent_games(team1['recent_games'], team1['slug'], for_llm=True),
                 "team2_info": format_intro(team2['name'], team2['rank'], team2['country'], team2.get('region')),
-                "team2_stats": format_stats(team2['stats_6m'], is_team=False) if team2['stats_6m'] else "N/A",
-                "team2_perf": format_performance({'6_months': team2['performance_6m']}, only_6m=True),
-                "team_2_recent": format_recent_games(team2['recent_games'], team2['slug'], for_llm=True),
                 "maps_analysis": format_maps_analysis(team1, team2, map_comparison, for_llm=True),
                 "bo_type": bo_type
             })
-            result = generate_text_analysis(response, team1, team2, map_comparison)
+            result = generate_text_analysis(response, team1, team2, map_comparison, data.get('last_clashes'))
+            game = db.session.query(GamesInfo).filter(GamesInfo.slug == game_slug).first()
+            if game and game.redondo_predictions is None:
+                game.redondo_predictions = ai_prediction
+                db.session.commit()
             game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
             if game_analytic:
                 game_analytic.pt_text = result

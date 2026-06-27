@@ -52,8 +52,8 @@ def get_team_games_info(slug):
         "last_month": {"win": 0, "lose": 0, "performance": 0}
     }
     one_year_ago = periods["12_months"]
-    team1 = func.substring_index(GamesInfo.slug, '-vs-', 1)
-    team2_raw = func.substring_index(GamesInfo.slug, '-vs-', -1)
+    team1 = func.substring_index(GamesInfo.slug, '-rs-', 1)
+    team2_raw = func.substring_index(GamesInfo.slug, '-rs-', -1)
     team2 = func.regexp_replace(team2_raw, r'-[0-9]{2}-[0-9]{2}-[0-9]{4}$', '')
     last_games = db.session.query(GamesInfo).filter(
         GamesInfo.status == 'finished',
