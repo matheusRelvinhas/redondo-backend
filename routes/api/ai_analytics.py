@@ -540,7 +540,6 @@ def generate_text_analysis(response, team1, team2, map_comparison, clashes_data=
     perf_items.append(f"<li><strong>{team2['name']}</strong><br>{team2_perf_html}<br>{team2_recent_html}</li>")
     result_parts.append(f"<ul>{''.join(perf_items)}</ul>")
     if clashes_data and clashes_data.get('games', 0) > 0:
-        print('ok')
         clashes_analysis_html = format_last_clashes_analysis(clashes_data, team1, team2)
         result_parts.append(clashes_analysis_html)
     maps_analysis_html = format_maps_analysis(team1, team2, map_comparison, for_llm=False)
@@ -567,7 +566,7 @@ def generate_team_analysis(app, analysis_id: int, team_slug: str):
             prompt = PromptTemplate.from_template("""
 You are a professional CS2(Counter Strike 2) esports analyst writing a human expert analysis (not structured with numbers).
 Write organic, flowing text about the team's positioning and recent form. Focus on last 6 months.
-RULES: Brazilian Portuguese only, valid HTML tags only (<p>,<strong>,<br>), max ~200 words, 3 paragraphs, no invented data, NO NUMBERED LISTS.
+RULES: Brazilian Portuguese only, valid HTML tags only (<p>,<strong>,<br>), max ~100 words, 2 paragraphs, no invented data, NO NUMBERED LISTS.
 Use <strong> tags to highlight: team name, key statistics, relevant performance data, and important achievements.
 Write as an expert would: discuss team positioning, current form, performance trends, and map strengths naturally.
 DATA: Team: {team} | Stats: {stats} | Performance: {performance} | Top Maps: {maps} | Active Leagues: {leagues} | Recent Form: {recent}""")
@@ -681,6 +680,7 @@ def calculate_game_prediction(data):
         maps_score_team1 = 0.5
         maps_score_team2 = 0.5
     ai_pred = game_info.get('ai_predictions')
+    print(ai_pred)
     ai_pred_prob_team1 = parse_ai_prediction_to_probability(ai_pred)
     if ai_pred_prob_team1 is not None:
         ai_pred_prob_team2 = 1 - ai_pred_prob_team1
@@ -758,10 +758,11 @@ def generate_game_analysis(app, analysis_id: int, game_slug: str):
             map_comparison = data['map_comparison']
             bo_type = game_info.get('bo_type', 3)
             ai_prediction = calculate_game_prediction(data)
+            print(f"rd-{ai_prediction}")
             prompt = PromptTemplate.from_template("""
 You are a professional CS2(Counter Strike 2) esports analyst writing a pre-game prediction analysis.
 Write organic, flowing text comparing both teams and presenting the predicted match outcome. Focus on last 6 months data.
-RULES: Brazilian Portuguese only, ONLY use HTML tags (<p>, <strong>, <br>) - NO MARKDOWN, NO ** OR __, max ~280 words, 3 paragraphs, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
+RULES: Brazilian Portuguese only, ONLY use HTML tags (<p>, <strong>, <br>) - NO MARKDOWN, NO ** OR __, max ~100 words, 2 paragraphs, no invented data, NO NUMBERED LISTS, NO BULLET POINTS.
 IMPORTANT: Use ONLY <strong>text</strong> format, NEVER use **text** or __text__ markdown formatting.
 Use <strong> tags to highlight: team names, statistics, key differences, and the predicted result.
 Write as an expert would: discuss team comparison, map pool differences, recent form, and explain the predicted outcome.
@@ -774,8 +775,9 @@ Maps Analysis: {maps_analysis}
 Match: BO{bo_type}
 """)
             chain = prompt | ChatOpenAI(model="gpt-4o-mini", api_key=current_app.config["OPENAI_API_KEY"])
+            print(f"{team1['name']} {ai_prediction} {team2['name']}")
             response = chain.invoke({
-                "ai_prediction": ai_prediction,
+                "ai_prediction": f"{team1['name']} {ai_prediction} {team2['name']}",
                 "team1_info": format_intro(team1['name'], team1['rank'], team1['country'], team1.get('region')),
                 "team2_info": format_intro(team2['name'], team2['rank'], team2['country'], team2.get('region')),
                 "maps_analysis": format_maps_analysis(team1, team2, map_comparison, for_llm=True),
