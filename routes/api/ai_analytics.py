@@ -15,7 +15,9 @@ bp = Blueprint('ai_analytics', __name__, url_prefix='/api/ai_analytics')
 
 CS2_MAPS = {
     "de_dust2": "Dust 2", "de_mirage": "Mirage", "de_inferno": "Inferno",
-    "de_nuke": "Nuke", "de_overpass": "Overpass", "de_ancient": "Ancient", "de_anubis": "Anubis"
+    "de_nuke": "Nuke", "de_overpass": "Overpass", "de_ancient": "Ancient", 
+    "de_anubis": "Anubis", "de_vertigo": "Vertigo", "de_train": "Train",
+    "de_cache": "Cache"
 }
 
 def round_floats(data, decimals=2):
@@ -785,9 +787,8 @@ Match: BO{bo_type}
             })
             result = generate_text_analysis(response, team1, team2, map_comparison, data.get('last_clashes'))
             game = db.session.query(GamesInfo).filter(GamesInfo.slug == game_slug).first()
-            if game and game.redondo_predictions is None:
-                game.redondo_predictions = ai_prediction
-                db.session.commit()
+            game.redondo_predictions = ai_prediction
+            db.session.commit()
             game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
             if game_analytic:
                 game_analytic.pt_text = result
