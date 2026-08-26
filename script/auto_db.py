@@ -12,6 +12,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models import db, GamesInfo, TeamsInfo, PlayerStatsLastMonth, PlayerStats3Months, PlayerStats6Months, PlayerStats12Months, LeaguesInfo
 from app import create_app
 from sqlalchemy import or_, and_
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm.exc import StaleDataError
 
 API_FINISHED_GAME_PART = "https://api.bo3.gg/api/v2/matches/finished?utc_offset=-10800&filter[tier][in]=s,a&filter[discipline_id][eq]=1&date="
 API_UPCOMING_GAME_PART = "https://api.bo3.gg/api/v2/matches/upcoming?utc_offset=-10800&filter[tier][in]=s,a&filter[discipline_id][eq]=1&date="
@@ -41,8 +43,19 @@ def safe_get(obj, *keys):
             return None
     return obj
 
+
+def normalize_page_range(value):
+    if value is None:
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        logger.warning(f"Invalid page range value: {value}")
+        return 0
+
+
 def get_range(api_url, limit, new_range=False):
-    max_range = None
+    max_range = 0
     url_range = f"{api_url}&page[offset]=0&page[limit]={limit}"
     if new_range:
         url_range = f"{api_url}&page=1&per_page={limit}"
@@ -52,14 +65,16 @@ def get_range(api_url, limit, new_range=False):
         range_response.raise_for_status()
         range_data = range_response.json()
         if new_range:
-            if safe_get(range_data, "meta", "total_count"):
-                max_range = safe_get(range_data, "meta", "total_count") + (limit+1)
+            total_count = safe_get(range_data, "meta", "total_count")
         else:
-            if safe_get(range_data, "total", "count"):
-                max_range = safe_get(range_data, "total", "count") + (limit+1)
-        return max_range
+            total_count = safe_get(range_data, "total", "count")
+        max_range = normalize_page_range(total_count)
+        if max_range > 0:
+            return max_range + (limit + 1)
+        return 0
     except requests.RequestException as e:
         logger.error(f"Error accessing {url_range}: {e}")
+        return 0
 
 def get_oldest_date():
     games = db.session.query(GamesInfo).filter(GamesInfo.start_date != None).all()
@@ -106,16 +121,20 @@ def delete_games():
     db.session.commit()
 
 def addOrAttGamesInfo(g, is_live):
-    game = GamesInfo.query.filter_by(game_id=safe_get(g, "id")).first()
+    game_id = safe_get(g, "id")
+    if not game_id:
+        logger.warning("Skipping game without id")
+        return
+
+    game = GamesInfo.query.filter_by(game_id=game_id).first()
     ai_predictions = None
     if (
         (safe_get(g, 'ai_predictions', 'prediction_team1_score') is not None and isinstance(safe_get(g, 'ai_predictions', 'prediction_team1_score'), (int, float)))
         and (safe_get(g, 'ai_predictions', 'prediction_team2_score') is not None and isinstance(safe_get(g, 'ai_predictions', 'prediction_team2_score'), (int, float)))
     ):
         ai_predictions = f"{safe_get(g, 'ai_predictions', 'prediction_team1_score')}-{safe_get(g, 'ai_predictions', 'prediction_team2_score')}"
-    else: print(g)
     game_data = {
-        "game_id": safe_get(g, "id"),
+        "game_id": game_id,
         "slug": transform_slug(safe_get(g, "slug")),
         "status": safe_get(g, "status"),
         "parsed_status": safe_get(g, "parsed_status"),
@@ -140,7 +159,21 @@ def addOrAttGamesInfo(g, is_live):
     else:
         for key, value in game_data.items():
             setattr(game, key, value)
-    db.session.commit()
+
+    try:
+        db.session.commit()
+    except StaleDataError:
+        db.session.rollback()
+        db.session.remove()
+        logger.warning(f"Stale data while saving game {game_id}; retrying next cycle")
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        db.session.remove()
+        logger.warning(f"Database error while saving game {game_id}: {exc}. Retrying next cycle")
+    except Exception as exc:
+        db.session.rollback()
+        db.session.remove()
+        logger.warning(f"Unexpected error while saving game {game_id}: {exc}. Retrying next cycle")
 
 def get_url_att_game(url, date_str, is_live=False):
     try:

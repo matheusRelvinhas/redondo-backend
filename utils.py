@@ -4,6 +4,27 @@ from flask import jsonify, request, current_app, Response
 from models import User
 from functools import wraps
 
+
+def get_rate_limit_key():
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        client_ip = request.remote_addr or "unknown"
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+            user_id = payload.get("user_id")
+            if user_id is not None:
+                return f"user:{user_id}:{client_ip}"
+        except Exception:
+            pass
+
+    return f"ip:{client_ip}"
+
 def responseApi(dict: dict, status_code: int = 200):
     return jsonify(dict), status_code
 

@@ -18,6 +18,15 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: redondo-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - redondo-network
+    restart: unless-stopped
+
   flask:
     build:
       context: .
@@ -26,6 +35,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/${MYSQL_DATABASE}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     ports:
       - "3001:3001"
     volumes:
@@ -34,6 +44,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - redondo-network
     restart: unless-stopped

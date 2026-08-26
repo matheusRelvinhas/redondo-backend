@@ -12,6 +12,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_talisman import Talisman
 from loguru import logger
 from cache_scheduler import init_cache_cleanup_scheduler
+from utils import get_rate_limit_key
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
@@ -28,24 +29,42 @@ def create_app():
     )
 
     
-    Talisman(app, content_security_policy=None, force_https=False)
+    Talisman(app, content_security_policy=None, force_https=app.config.get('ENVIRONMENT', 'development').lower() == 'production')
     
-    cache = Cache(app)
+    try:
+        cache = Cache(app)
+    except RuntimeError as exc:
+        if 'redis' in str(exc).lower():
+            logger.warning(f"Redis cache backend unavailable: {exc}. Falling back to filesystem cache")
+            app.config['CACHE_TYPE'] = 'FileSystemCache'
+            app.config['CACHE_DIR'] = 'cache'
+            cache = Cache(app)
+        else:
+            raise
     app.cache = cache
+
+    if app.config.get('ENVIRONMENT', 'development').lower() == 'production':
+        logger.info("Using Redis cache backend in production")
+    else:
+        logger.info("Using filesystem cache backend in development")
     
     limiter = Limiter(
         app=app,
-        key_func=get_remote_address,
+        key_func=get_rate_limit_key,
         default_limits=[],
         storage_uri="memory://",
         strategy="moving-window"
     )
     app.limiter = limiter
     
+    cors_origins = app.config.get('CORS_ORIGINS', [])
+    if isinstance(cors_origins, str):
+        cors_origins = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
+
     CORS(
         app,
-        origins=app.config['CORS_ORIGINS'],
-        supports_credentials=app.config['CORS_SUPPORTS_CREDENTIALS']
+        origins=cors_origins,
+        supports_credentials=app.config.get('CORS_SUPPORTS_CREDENTIALS', False)
     )
     
     db.init_app(app)
@@ -57,7 +76,6 @@ def create_app():
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
     
-    # ========== OAUTH (Google) ==========
     oauth = OAuth(app)
     oauth.register(
         name='google',

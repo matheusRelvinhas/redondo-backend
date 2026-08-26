@@ -14,9 +14,15 @@ from langchain_openai import ChatOpenAI
 bp = Blueprint('ai_analytics', __name__, url_prefix='/api/ai_analytics')
 
 CS2_MAPS = {
-    "de_dust2": "Dust 2", "de_mirage": "Mirage", "de_inferno": "Inferno",
-    "de_nuke": "Nuke", "de_overpass": "Overpass", "de_ancient": "Ancient", 
-    "de_anubis": "Anubis", "de_vertigo": "Vertigo", "de_train": "Train",
+    "de_dust2": "Dust 2", 
+    "de_mirage": "Mirage", 
+    "de_inferno": "Inferno",
+    "de_nuke": "Nuke", 
+    #"de_overpass": "Overpass", 
+    "de_ancient": "Ancient", 
+    "de_anubis": "Anubis", 
+    #"de_vertigo": "Vertigo", 
+    #"de_train": "Train",
     "de_cache": "Cache"
 }
 
@@ -666,23 +672,31 @@ def calculate_game_prediction(data):
             clashes_score_team2 = team2_clash_wins / total_clashes
     maps_score_team1 = 0
     maps_score_team2 = 0
-    map_count = 0
+    map_count_team1 = 0
+    map_count_team2 = 0
     for map_name, comparison in map_comparison.items():
-        t1_wr = comparison.get('team1', {}).get('winrate', 0) or 0
-        t2_wr = comparison.get('team2', {}).get('winrate', 0) or 0
-        total_map_wr = (t1_wr + t2_wr) if (t1_wr + t2_wr) > 0 else 1
-        if total_map_wr > 0:
-            maps_score_team1 += t1_wr / total_map_wr
-            maps_score_team2 += t2_wr / total_map_wr
-            map_count += 1
-    if map_count > 0:
-        maps_score_team1 /= map_count
-        maps_score_team2 /= map_count
+        team1_map = comparison.get('team1', {}) or {}
+        team2_map = comparison.get('team2', {}) or {}
+        t1_total = team1_map.get('total', 0) or 0
+        t2_total = team2_map.get('total', 0) or 0
+        if t1_total > 0:
+            t1_wins = team1_map.get('wins', 0) or 0
+            maps_score_team1 += t1_wins / t1_total
+            map_count_team1 += 1
+        if t2_total > 0:
+            t2_wins = team2_map.get('wins', 0) or 0
+            maps_score_team2 += t2_wins / t2_total
+            map_count_team2 += 1
+    if map_count_team1 > 0:
+        maps_score_team1 /= map_count_team1
     else:
         maps_score_team1 = 0.5
+    if map_count_team2 > 0:
+        maps_score_team2 /= map_count_team2
+    else:
         maps_score_team2 = 0.5
     ai_pred = game_info.get('ai_predictions')
-    print(ai_pred)
+    #print(ai_pred)
     ai_pred_prob_team1 = parse_ai_prediction_to_probability(ai_pred)
     if ai_pred_prob_team1 is not None:
         ai_pred_prob_team2 = 1 - ai_pred_prob_team1
@@ -743,6 +757,24 @@ def calculate_game_prediction(data):
     return "2-1" if team1_probability >= 0.5 else "1-2"
 
 
+def get_predicted_winner_name(prediction_str, team1_name, team2_name):
+    if not prediction_str:
+        return None
+    try:
+        parts = str(prediction_str).split('-')
+        if len(parts) != 2:
+            return None
+        team1_score = int(parts[0])
+        team2_score = int(parts[1])
+        if team1_score > team2_score:
+            return team1_name
+        if team2_score > team1_score:
+            return team2_name
+        return None
+    except (ValueError, TypeError):
+        return None
+
+
 def generate_game_analysis(app, analysis_id: int, game_slug: str):
     with app.app_context():
         try:
@@ -760,7 +792,8 @@ def generate_game_analysis(app, analysis_id: int, game_slug: str):
             map_comparison = data['map_comparison']
             bo_type = game_info.get('bo_type', 3)
             ai_prediction = calculate_game_prediction(data)
-            print(f"rd-{ai_prediction}")
+            text_ai_prediction = f"{team1['name']} {ai_prediction} {team2['name']}"
+            predicted_winner_name = get_predicted_winner_name(ai_prediction, team1['name'], team2['name'])
             prompt = PromptTemplate.from_template("""
 You are a professional CS2(Counter Strike 2) esports analyst writing a pre-game prediction analysis.
 Write organic, flowing text comparing both teams and presenting the predicted match outcome. Focus on last 6 months data.
@@ -769,7 +802,9 @@ IMPORTANT: Use ONLY <strong>text</strong> format, NEVER use **text** or __text__
 Use <strong> tags to highlight: team names, statistics, key differences, and the predicted result.
 Write as an expert would: discuss team comparison, map pool differences, recent form, and explain the predicted outcome.
 Don't write about the day or date, as the analysis can be done days before the game.
-PREDICTED RESULT: {ai_prediction}
+PREDICTED RESULT: {text_ai_prediction}
+PREDICTED WINNER: {predicted_winner_name}
+IMPORTANT: The predicted winner is {predicted_winner_name}. Use that exact team as the winner in the analysis. Do not say the other team will win and do not produce a sentence that contradicts the prediction.
 DATA: 
 Team1: {team1_info}
 Team2: {team2_info}
@@ -777,9 +812,10 @@ Maps Analysis: {maps_analysis}
 Match: BO{bo_type}
 """)
             chain = prompt | ChatOpenAI(model="gpt-4o-mini", api_key=current_app.config["OPENAI_API_KEY"])
-            print(f"{team1['name']} {ai_prediction} {team2['name']}")
             response = chain.invoke({
-                "ai_prediction": f"{team1['name']} {ai_prediction} {team2['name']}",
+                "ai_prediction": ai_prediction,
+                "text_ai_prediction": text_ai_prediction,
+                "predicted_winner_name": predicted_winner_name,
                 "team1_info": format_intro(team1['name'], team1['rank'], team1['country'], team1.get('region')),
                 "team2_info": format_intro(team2['name'], team2['rank'], team2['country'], team2.get('region')),
                 "maps_analysis": format_maps_analysis(team1, team2, map_comparison, for_llm=True),

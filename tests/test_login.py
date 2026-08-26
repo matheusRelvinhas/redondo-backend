@@ -4,13 +4,15 @@ import os
 import sys
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
+from flask import Flask
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from routes.api.login import (
     validate_email_function,
     validate_password,
-    generate_jwt_token
+    generate_jwt_token,
+    get_request_payload
 )
 
 class TestValidateEmailFunction:
@@ -97,6 +99,23 @@ class TestValidatePassword:
     def test_invalid_password_7_chars(self):
         """Testa senha inválida com 7 caracteres"""
         assert validate_password("Abcd123") == False
+
+
+class TestRequestPayload:
+
+    def test_get_request_payload_reads_json_body(self):
+        app = Flask(__name__)
+        with app.test_request_context('/', method='POST', json={'email': 'user@example.com', 'password': 'Password1'}):
+            payload = get_request_payload()
+            assert payload['email'] == 'user@example.com'
+            assert payload['password'] == 'Password1'
+
+    def test_get_request_payload_reads_form_body(self):
+        app = Flask(__name__)
+        with app.test_request_context('/', method='POST', data={'email': 'user@example.com', 'password': 'Password1'}):
+            payload = get_request_payload()
+            assert payload['email'] == 'user@example.com'
+            assert payload['password'] == 'Password1'
 
 
 class TestGenerateJwtToken:

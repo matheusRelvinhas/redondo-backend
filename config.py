@@ -3,8 +3,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class Config:
+    ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
+    REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 10,
@@ -19,11 +22,15 @@ class Config:
     CACHE_TYPE = 'FileSystemCache'
     CACHE_DIR = 'cache'
     CACHE_DEFAULT_TIMEOUT = 60 * 20
+    CACHE_REDIS_URL = REDIS_URL
     MAX_CONTENT_LENGTH = 2 * 1024 * 1024
-    SECRET_KEY = os.getenv('GOOGLE_CLIENT_SECRET')
+    SECRET_KEY = os.getenv('SECRET_KEY') or os.getenv('JWT_SECRET_KEY') or os.urandom(24).hex()
     LOG_LEVEL = 'INFO'
-    CORS_ORIGINS = "*"
-    CORS_SUPPORTS_CREDENTIALS = True
+    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
+    CORS_SUPPORTS_CREDENTIALS = False
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SECURE = ENVIRONMENT == 'production'
+    SESSION_COOKIE_SAMESITE = 'Lax'
 
 
 class DevelopmentConfig(Config):
@@ -32,6 +39,7 @@ class DevelopmentConfig(Config):
     FLASK_ENV = 'development'
     LOG_LEVEL = 'DEBUG'
     THREADED = True
+    CACHE_TYPE = 'FileSystemCache'
     CACHE_DEFAULT_TIMEOUT = 60 * 5
 
 
@@ -41,6 +49,8 @@ class ProductionConfig(Config):
     FLASK_ENV = 'production'
     LOG_LEVEL = 'WARNING'
     USE_RELOADER = False
+    CACHE_TYPE = 'RedisCache'
+    CACHE_REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 20,
         'pool_recycle': 3600,
