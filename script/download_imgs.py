@@ -8,17 +8,11 @@ from loguru import logger
 from app import create_app
 
 current_script_dir = os.path.dirname(os.path.abspath(__file__))
-backend_base_dir = os.path.dirname(os.path.dirname(current_script_dir))
+backend_dir = os.path.dirname(current_script_dir)
 
 app = create_app()
 
-BASE_IMG_PATH = os.path.join(
-    backend_base_dir, 
-    'project-x', 
-    'public', 
-    'img',
-    'imgs'
-)
+BASE_IMG_PATH = os.path.join(backend_dir, 'img', 'imgs')
 
 DIRS = {
     "team": os.path.join(BASE_IMG_PATH, 'teams'),

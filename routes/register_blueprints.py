@@ -1,5 +1,5 @@
 from flask import Flask
-from routes.api import login, player_stats, teams_stats, leagues_stats, games_stats, ai_analytics, ai_performance
+from routes.api import login, player_stats, teams_stats, leagues_stats, games_stats, ai_analytics, ai_performance, img
 
 def register_blueprints(app: Flask):
 
@@ -16,3 +16,5 @@ def register_blueprints(app: Flask):
     app.register_blueprint(ai_analytics.bp)
 
     app.register_blueprint(ai_performance.bp)
+
+    app.register_blueprint(img.bp)
