@@ -373,6 +373,7 @@ class AiAnalytics(db.Model):
     status = db.Column(db.String(20), nullable=False)
     pt_text = db.Column(db.TEXT, nullable=True)
     #en_text = db.Column(db.String(100), nullable=True)
+    data = db.Column(db.JSON, nullable=True)
     finished = db.Column(db.Boolean, default=False)
     
     created_at = db.Column(db.Integer, default=lambda: int(datetime.now(brasilia_tz).timestamp()), nullable=True)

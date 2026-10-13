@@ -261,20 +261,132 @@ def extract_map_categories_6m(maps_dict):
         'bem_estabelecidos': bem_estabelecidos
     }
 
-def format_last_clashes_analysis(clashes_data, team1, team2):
-    games = clashes_data.get('games', 0)
-    team1_wins = clashes_data.get('team1_wins', 0)
-    team2_wins = clashes_data.get('team2_wins', 0)
-    if games == 0:
-        return "<p>Sem histórico de confrontos diretos entre essas equipes.</p>"
-    team1_wr = round(team1_wins / games * 100) if games > 0 else 0
-    team2_wr = round(team2_wins / games * 100) if games > 0 else 0
-    team1_wr_class = get_performance_class(team1_wr)
-    team2_wr_class = get_performance_class(team2_wr)
-    result_parts = []
-    result_parts.append("\n<p><strong>Histórico de Confrontos Diretos (últimos 5 jogos):</strong><br>")
-    result_parts.append(f"Confrontos diretos: <strong>{games}</strong> jogos | <strong>{team1['name']}</strong> <strong class='{team1_wr_class}'>{team1_wins}V ({team1_wr}%)</strong> vs <strong>{team2['name']}</strong> <strong class='{team2_wr_class}'>{team2_wins}V ({team2_wr}%)</strong></p>")
-    return "".join(result_parts)
+def percent_to_int(value):
+    if isinstance(value, str):
+        value = value.rstrip('%')
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return 0
+
+def favoritism_level(diff):
+    if diff > 30:
+        return 'high'
+    if diff >= 16:
+        return 'medium'
+    return 'low'
+
+def recent_games_data(games, team_slug):
+    items = []
+    for g in games or []:
+        is_team1 = g.get('team1_slug') == team_slug
+        score = g.get('team1_score' if is_team1 else 'team2_score') or 0
+        opponent_score = g.get('team2_score' if is_team1 else 'team1_score') or 0
+        items.append({
+            'game_slug': g.get('slug'),
+            'opponent': g.get('team2_name' if is_team1 else 'team1_name'),
+            'opponent_slug': g.get('team2_slug' if is_team1 else 'team1_slug'),
+            'score': score,
+            'opponent_score': opponent_score,
+            'won': score > opponent_score,
+        })
+    wins = sum(1 for i in items if i['won'])
+    return {
+        'games': items,
+        'wins': wins,
+        'losses': len(items) - wins,
+        'performance': round(wins / len(items) * 100) if items else 0,
+    }
+
+def team_maps_overview(team):
+    analyzed = [(name, s) for name, s in team['maps'].items() if s['total'] >= 5]
+    best = max(analyzed, key=lambda x: x[1]['winrate']) if analyzed else None
+    categories = extract_map_categories_6m(team['maps'])
+    return {
+        'best_map': (
+            {'map': best[0], 'winrate': best[1]['winrate'], 'total': best[1]['total']}
+            if best else None
+        ),
+        'never_played': categories['veto_fixo'],
+        'rarely_played': [{'map': name, 'total': total} for name, total in categories['raramente']],
+    }
+
+def build_game_analysis_data(team1, team2, map_comparison, clashes_data=None):
+    """
+    Os números que antes só existiam dentro do HTML, agora como dado.
+    O pt_text fica só com o texto da IA e o front monta os cards a partir daqui.
+    """
+    def identity(team):
+        return {
+            'slug': team['slug'],
+            'name': team['name'],
+            'img_url': team.get('img_url'),
+            'rank': team.get('rank'),
+        }
+
+    def six_months(team):
+        perf = team.get('performance_6m') or {}
+        return {
+            'wins': perf.get('win', 0),
+            'losses': perf.get('lose', 0),
+            'performance': percent_to_int(perf.get('performance', 0)),
+            'recent': recent_games_data(team.get('recent_games'), team['slug']),
+        }
+
+    clashes = clashes_data or {}
+    clash_games = clashes.get('games', 0)
+    clash_t1 = clashes.get('team1_wins', 0)
+    clash_t2 = clashes.get('team2_wins', 0)
+
+    critical_maps = []
+    maps_performance = []
+    for map_name in CS2_MAPS.values():
+        comparison = map_comparison.get(map_name)
+        if not comparison:
+            continue
+        t1 = comparison['team1']
+        t2 = comparison['team2']
+        # sem jogos de um dos lados não há comparação possível
+        if t1['total'] == 0 or t2['total'] == 0:
+            continue
+        diff = abs(t1['winrate'] - t2['winrate'])
+        advantage = (
+            'team1' if t1['winrate'] > t2['winrate']
+            else 'team2' if t2['winrate'] > t1['winrate']
+            else 'neutral'
+        )
+        critical_maps.append({
+            'map': map_name,
+            'advantage': advantage,
+            'favoritism': favoritism_level(diff),
+            'diff': diff,
+        })
+        maps_performance.append({
+            'map': map_name,
+            'advantage': advantage,
+            'team1': {k: t1[k] for k in ('winrate', 'wins', 'losses', 'total')},
+            'team2': {k: t2[k] for k in ('winrate', 'wins', 'losses', 'total')},
+        })
+
+    return {
+        'teams': {'team1': identity(team1), 'team2': identity(team2)},
+        'last_6months_games': {'team1': six_months(team1), 'team2': six_months(team2)},
+        'head_to_head': {
+            'games': clash_games,
+            'team1': {
+                'wins': clash_t1,
+                'winrate': round(clash_t1 / clash_games * 100) if clash_games else 0,
+            },
+            'team2': {
+                'wins': clash_t2,
+                'winrate': round(clash_t2 / clash_games * 100) if clash_games else 0,
+            },
+        },
+        'maps_overview': {'team1': team_maps_overview(team1), 'team2': team_maps_overview(team2)},
+        'critical_maps': critical_maps,
+        'maps_performance': maps_performance,
+    }
+
 
 def format_maps_analysis(team1, team2, map_comparison, for_llm=False):
     if for_llm:
@@ -512,6 +624,7 @@ def get_game_ai_analytics(game_slug):
         'team1': {
             'slug': team1_slug,
             'name': team1.team_name,
+            'img_url': team1.to_dict().get('img_url'),
             'rank': team1.rank,
             'country': team1.country_code,
             'region': team1.region_code,
@@ -523,6 +636,7 @@ def get_game_ai_analytics(game_slug):
         'team2': {
             'slug': team2_slug,
             'name': team2.team_name,
+            'img_url': team2.to_dict().get('img_url'),
             'rank': team2.rank,
             'country': team2.country_code,
             'region': team2.region_code,
@@ -535,25 +649,6 @@ def get_game_ai_analytics(game_slug):
         'last_clashes': last_clashes
     }
 
-def generate_text_analysis(response, team1, team2, map_comparison, clashes_data=None):
-    result_parts = []
-    result_parts.append(response.content.strip())
-    result_parts.append("\n<p><strong>Análise de Jogos (últimos 6 meses):</strong></p>")
-    team1_perf_html = format_performance({'6_months': team1['performance_6m']}, only_6m=True)
-    team1_recent_html = format_recent_games(team1['recent_games'], team1['slug'], for_llm=False)
-    team2_perf_html = format_performance({'6_months': team2['performance_6m']}, only_6m=True)
-    team2_recent_html = format_recent_games(team2['recent_games'], team2['slug'], for_llm=False)
-    perf_items = []
-    perf_items.append(f"<li><strong>{team1['name']}</strong><br>{team1_perf_html}<br>{team1_recent_html}</li>")
-    perf_items.append(f"<li><strong>{team2['name']}</strong><br>{team2_perf_html}<br>{team2_recent_html}</li>")
-    result_parts.append(f"<ul>{''.join(perf_items)}</ul>")
-    if clashes_data and clashes_data.get('games', 0) > 0:
-        clashes_analysis_html = format_last_clashes_analysis(clashes_data, team1, team2)
-        result_parts.append(clashes_analysis_html)
-    maps_analysis_html = format_maps_analysis(team1, team2, map_comparison, for_llm=False)
-    result_parts.append(maps_analysis_html)
-    result = "".join(result_parts)
-    return result
 
 def generate_team_analysis(app, analysis_id: int, team_slug: str):
     with app.app_context():
@@ -821,13 +916,17 @@ Match: BO{bo_type}
                 "maps_analysis": format_maps_analysis(team1, team2, map_comparison, for_llm=True),
                 "bo_type": bo_type
             })
-            result = generate_text_analysis(response, team1, team2, map_comparison, data.get('last_clashes'))
+            result = response.content.strip()
+            analysis_data = build_game_analysis_data(
+                team1, team2, map_comparison, data.get('last_clashes')
+            )
             game = db.session.query(GamesInfo).filter(GamesInfo.slug == game_slug).first()
             game.redondo_predictions = ai_prediction
             db.session.commit()
             game_analytic = db.session.query(AiAnalytics).filter(AiAnalytics.id == analysis_id).first()
             if game_analytic:
                 game_analytic.pt_text = result
+                game_analytic.data = analysis_data
                 game_analytic.status = 'success'
                 db.session.commit()
                 logger.info(f"Game analysis generated successfully: {game_slug}")
@@ -902,10 +1001,12 @@ def ai_analytics_game():
             threading.Thread(target=generate_game_analysis, args=(current_app._get_current_object(), new.id, slug)).start()
             return responseApi({"ai_analytics_game": None, "status": "pending"}, 200)
         result = None
+        analysis_data = None
         if game_analytic.status == 'success':
             result = game_analytic.pt_text
-            current_app.cache.set(cache_key, {"ai_analytics_game": result, "status": "success", "timestamp": game_analytic.updated_at}, timeout=86400)
-        return responseApi({"ai_analytics_game": result, "status": game_analytic.status, "timestamp": game_analytic.updated_at}, 200)
+            analysis_data = game_analytic.data
+            current_app.cache.set(cache_key, {"ai_analytics_game": result, "data": analysis_data, "status": "success", "timestamp": game_analytic.updated_at}, timeout=86400)
+        return responseApi({"ai_analytics_game": result, "data": analysis_data, "status": game_analytic.status, "timestamp": game_analytic.updated_at}, 200)
     except Exception as e:
         logger.error(f"game endpoint error: {e}\n{traceback.format_exc()}")
         return responseApi({"error": "internal_error"}, 500)
